@@ -1,0 +1,12 @@
+Run-Off Project Notes
+
+MAC Python vm
+TO get in: Source runoff_env/bin/activate
+To get out: Deactivate
+
+(Summary of Tasks)
+* Data handling and preprocessing: Use libraries like Pandas and NumPy.
+* Data visualization: Use Matplotlib or Seaborn.
+* Deep-learning modeling: Use TensorFlow or PyTorch. Both have strong support for building and training neural networks.
+* Model evaluation and error analysis: Leverage scikit-learn for metrics and possibly ensemble methods if needed.
+
