@@ -35,3 +35,8 @@ runoff_env_py310/
 .DS_Store
 .idea/
 .vscode/
+results/predictions.csv
+results/*.csv
+data/
+*.h5
+runoff_env*/
