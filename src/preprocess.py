@@ -9,42 +9,82 @@ os.makedirs('../data/processed', exist_ok=True)
 
 def load_data():
     """
-    Load NWM forecasts and USGS observed runoff data
+    Load NWM forecasts and USGS observed runoff data from multiple files
     """
     print("Loading data...")
     try:
-        # Load NWM forecasts data
-        nwm_data = pd.read_csv('../data/nwm_forecasts.csv')
-        # Load USGS observed runoff data
-        usgs_data = pd.read_csv('../data/usgs_observations.csv')
+        # Load and combine NWM forecast data from folder1 (stream ID: 20380357)
+        nwm_data_list1 = []
+        folder1_path = '../data/folder1'
+        for file in os.listdir(folder1_path):
+            if file.startswith('streamflow_20380357_') and file.endswith('.csv'):
+                file_path = os.path.join(folder1_path, file)
+                df = pd.read_csv(file_path)
+                df['station_id'] = '20380357'
+                nwm_data_list1.append(df)
+
+        # Load and combine NWM forecast data from folder2 (stream ID: 21609641)
+        nwm_data_list2 = []
+        folder2_path = '../data/folder2'
+        for file in os.listdir(folder2_path):
+            if file.startswith('streamflow_21609641_') and file.endswith('.csv'):
+                file_path = os.path.join(folder2_path, file)
+                df = pd.read_csv(file_path)
+                df['station_id'] = '21609641'
+                nwm_data_list2.append(df)
+        
+        # Combine all NWM data
+        nwm_data = pd.concat(nwm_data_list1 + nwm_data_list2, ignore_index=True)
+        
+        # Rename columns to match expected format in the rest of the script
+        nwm_data = nwm_data.rename(columns={
+            'model_output_valid_time': 'date',
+            'streamflow_value': 'runoff_nwm',
+            'streamID': 'stream_id'
+        })
+        
+        # Load USGS data
+        usgs_data1 = pd.read_csv('../data/folder1/09520500_Strt_2021-04-20_EndAt_2023-04-21.csv')
+        usgs_data1['station_id'] = '20380357'  # Associate with corresponding NWM station
+        
+        usgs_data2 = pd.read_csv('../data/folder2/11266500_Strt_2021-04-20_EndAt_2023-04-21.csv')
+        usgs_data2['station_id'] = '21609641'  # Associate with corresponding NWM station
+        
+        # Combine USGS data
+        usgs_data = pd.concat([usgs_data1, usgs_data2], ignore_index=True)
+        
+        # Rename columns to match expected format
+        usgs_data = usgs_data.rename(columns={
+            'DateTime': 'date',
+            'USGSFlowValue': 'runoff_usgs'
+        })
         
         return nwm_data, usgs_data
-    except FileNotFoundError as e:
+    except Exception as e:
         print(f"Error: {e}")
-        print("Please ensure that the data files exist in the data directory")
+        print("Please ensure that the data files exist in the data directory with the expected structure.")
         return None, None
 
 def clean_data(nwm_data, usgs_data):
     """
     Clean and preprocess the data
-    - Handle missing values
-    - Align timestamps
-    - Convert units if necessary
     """
     print("Cleaning data...")
     
-    # Convert date strings to datetime objects
-    nwm_data['date'] = pd.to_datetime(nwm_data['date'])
+    # Process NWM data
+    nwm_data['date'] = pd.to_datetime(nwm_data['date'].str.replace('_', ' '))
+    
+    # Process USGS data
     usgs_data['date'] = pd.to_datetime(usgs_data['date'])
     
-    # Align timestamps between datasets
-    merged_data = pd.merge(nwm_data, usgs_data, on='date', suffixes=('_nwm', '_usgs'))
+    # Merge data by date and station ID
+    merged_data = pd.merge(nwm_data, usgs_data, on=['date', 'station_id'])
     
     # Handle missing values (interpolate)
     merged_data = merged_data.interpolate(method='linear')
     
     # Drop any remaining rows with missing values
-    merged_data = merged_data.dropna()
+    merged_data = merged_data.dropna(subset=['runoff_nwm', 'runoff_usgs'])
     
     return merged_data
 
