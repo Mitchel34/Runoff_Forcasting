@@ -26,8 +26,9 @@ def load_test_data_and_model():
         with open('../data/processed/scaler.pkl', 'rb') as f:
             scaler = pickle.load(f)
         
-        # Load model
-        model = tf.keras.models.load_model('../results/models/final_model.h5')
+        # Load model with custom_objects to resolve 'mse'
+        custom_objects = {'mse': tf.keras.losses.MeanSquaredError()}
+        model = tf.keras.models.load_model('../results/models/final_model.h5', custom_objects=custom_objects)
         
         return test_data, scaler, model
     
@@ -74,13 +75,13 @@ def generate_predictions(model, X_test, test_data, seq_length, lead_times, scale
         end_idx = len(test_data) - max(lead_times)
         
         # Extract dates for this prediction window
-        dates = test_data['date'].iloc[start_idx+lead-1:end_idx+lead].reset_index(drop=True)
+        dates = test_data['date'].iloc[start_idx+lead-1:end_idx+lead-1].reset_index(drop=True)
         
         # Get observed values
-        observed = test_data['runoff_usgs'].iloc[start_idx+lead-1:end_idx+lead].reset_index(drop=True)
+        observed = test_data['runoff_usgs'].iloc[start_idx+lead-1:end_idx+lead-1].reset_index(drop=True)
         
         # Get NWM forecasts
-        nwm_forecast = test_data['runoff_nwm'].iloc[start_idx+lead-1:end_idx+lead].reset_index(drop=True)
+        nwm_forecast = test_data['runoff_nwm'].iloc[start_idx+lead-1:end_idx+lead-1].reset_index(drop=True)
         
         # Inverse transform if needed (if scaler was applied)
         if 'runoff_nwm' in test_data.columns:

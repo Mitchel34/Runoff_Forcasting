@@ -77,6 +77,16 @@ def clean_data(nwm_data, usgs_data):
     # Process USGS data
     usgs_data['date'] = pd.to_datetime(usgs_data['date'])
     
+    # Convert both to naive datetime (no timezone) to fix the merge issue
+    if nwm_data['date'].dt.tz is not None:
+        nwm_data['date'] = nwm_data['date'].dt.tz_localize(None)
+    
+    if usgs_data['date'].dt.tz is not None:
+        usgs_data['date'] = usgs_data['date'].dt.tz_localize(None)
+    
+    print("NWM date type:", nwm_data['date'].dtype)
+    print("USGS date type:", usgs_data['date'].dtype)
+    
     # Merge data by date and station ID
     merged_data = pd.merge(nwm_data, usgs_data, on=['date', 'station_id'])
     
