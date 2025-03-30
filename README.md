@@ -1,8 +1,23 @@
+# CS 4440 Artificial Intelligence
+# Dr. Mohammad Ali Javidiian 
+# Appalachian State University
 
+# Final Project
+# Mitchel Carson & Christian Castaneda Reneau
+---------------------------------------------------------------------
 
 ## Project: Improving NWM Forecasts Using Deep Learning Post-processing
 
 This repository contains the code and documentation for an AI course project aimed at improving short-range runoff forecasts from the National Water Model (NWM) using deep learning post-processing techniques. The project leverages Python and popular libraries to preprocess data, train a deep learning model, and evaluate the corrected forecasts against observed runoff data.
+
+# Quick Start Guide
+pip install -r requirements.txt
+cd src
+python preprocess.py
+python model.py
+python evaluate.py
+
+The results will be saved in the results directory, including model files, evaluation metrics, and visualization plots.
 
 ### Process Description
 
