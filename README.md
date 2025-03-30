@@ -4,11 +4,16 @@
 
 # Final Project
 # Mitchel Carson & Christian Castaneda Reneau
----------------------------------------------------------------------
 
-## Project: Improving NWM Forecasts Using Deep Learning Post-processing
+## Improving NWM Forecasts Using Deep Learning Post-processing
 
 This repository contains the code and documentation for an AI course project aimed at improving short-range runoff forecasts from the National Water Model (NWM) using deep learning post-processing techniques. The project leverages Python and popular libraries to preprocess data, train a deep learning model, and evaluate the corrected forecasts against observed runoff data.
+
+# MAC tips (tensorflow doesn't support M1+ MACS)
+brew install python3.10
+- Create virtual Python enviornment
+python3.10 -m venv venv
+source venv/bin/activate
 
 # Quick Start Guide
 pip install -r requirements.txt
