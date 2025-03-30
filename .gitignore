@@ -1,0 +1,37 @@
+# Data files
+/data/folder1/**
+/data/folder2/**
+/data/processed/**
+*.csv
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+runoff_env_py310/
+
+# Other
+.DS_Store
+.idea/
+.vscode/
