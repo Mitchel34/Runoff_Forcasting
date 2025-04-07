@@ -113,6 +113,8 @@ python src/evaluate.py --predictions data/predictions/results.csv --observations
 ### Visualization
 ```
 python src/visualize.py --results <results_file>
+
+python src/visualize.py --predictions data/predictions/results.csv --observations data/processed/test_data.csv
 ```
 
 ## Notebooks
