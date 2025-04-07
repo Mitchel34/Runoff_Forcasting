@@ -165,36 +165,141 @@ def main(input_file, output_file=None, model_path=None):
             'predictions.csv'
         )
     
+    # Create predictions directory if it doesn't exist
+    predictions_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'data', 'predictions'
+    )
+    os.makedirs(predictions_dir, exist_ok=True)
+    
     # Load data
     print(f"Loading data from {input_file}")
     df = pd.read_csv(input_file)
     
+    # Ensure datetime is in correct format
+    if 'datetime' in df.columns:
+        df['datetime'] = pd.to_datetime(df['datetime'])
+    
     # Load model
     model = load_model(model_path)
     
-    # Define feature columns (this would be the same as used during training)
-    # This is a placeholder - actual feature columns would depend on your specific dataset
-    feature_columns = [col for col in df.columns if col.startswith('feature_')]
+    # Get the expected input shape from the model
+    input_shape = model.layers[0].input_shape
+    if isinstance(input_shape, list):
+        input_shape = input_shape[0]  # Get first input shape if multiple inputs
+    expected_features = input_shape[-1]  # Last dimension is the number of features
+    sequence_length = input_shape[1]  # Middle dimension is sequence length
     
-    # Prepare data
-    sequence_length = 24  # This should match the sequence length used during training
+    print(f"Model expects input shape with {expected_features} features and sequence length {sequence_length}")
+    
+    # Create the same features used during training
+    print("Creating features for prediction...")
+    df = create_features(df)
+    
+    # Hard-code exactly 10 features in the exact order needed
+    feature_columns = [
+        'hour', 'day', 'month', 'dayofweek', 'is_weekend',
+        'season_winter', 'season_spring', 'season_summer', 'season_fall',
+        'log_runoff_nwm'
+    ]
+    
+    # Check if all required features are available
+    missing_features = [col for col in feature_columns if col not in df.columns]
+    if missing_features:
+        print(f"ERROR: Missing required features: {missing_features}")
+        return
+    
+    print(f"Using features: {feature_columns}")
+    
+    # Prepare input data
     X, scaler_X = prepare_input_data(df, feature_columns, sequence_length)
+    
+    print(f"Input shape for prediction: {X.shape}")
+    
+    # Verify we have the correct number of features
+    if X.shape[2] != expected_features:
+        print(f"ERROR: Input has {X.shape[2]} features but model expects {expected_features}")
+        return
     
     # Make predictions
     predictions = make_predictions(model, X)
     
-    # Create a dummy scaler for demonstration
-    # In a real scenario, you would load the same scaler used during training
+    # Create a scaler for the target variable
     scaler_y = StandardScaler()
-    scaler_y.fit(df[['runoff_nwm']])
+    if 'runoff_usgs' in df.columns:
+        # If we have ground truth data, use it for the scaler
+        scaler_y.fit(df[['runoff_usgs']])
+    else:
+        # Otherwise use NWM data as a proxy
+        scaler_y.fit(df[['runoff_nwm']])
     
     # Inverse transform predictions if needed
     predictions = inverse_transform_predictions(predictions, scaler_y)
     
     # Save predictions
+    if output_file is None:
+        output_file = os.path.join(predictions_dir, 'predictions.csv')
+    
     result_df = save_predictions(df, predictions, sequence_length, output_file)
     
-    print("Prediction completed successfully!")
+    print(f"Prediction completed successfully! Results saved to {output_file}")
+
+def create_features(df):
+    """
+    Create additional features for prediction.
+    This should match the features created during training.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        Input DataFrame with datetime and runoff data
+        
+    Returns:
+    --------
+    df : pandas.DataFrame
+        DataFrame with additional features
+    """
+    # Add date-related features if datetime is present
+    if 'datetime' in df.columns:
+        df['hour'] = df['datetime'].dt.hour
+        df['day'] = df['datetime'].dt.day
+        df['month'] = df['datetime'].dt.month
+        df['dayofweek'] = df['datetime'].dt.dayofweek
+        df['is_weekend'] = (df['dayofweek'] >= 5).astype(int)
+        
+        # Add seasonal indicators, but only if they don't already exist
+        season_columns = ['season_winter', 'season_spring', 'season_summer', 'season_fall']
+        if not all(col in df.columns for col in season_columns):
+            # Create season categorical variable
+            df['season'] = pd.cut(
+                df['datetime'].dt.month,
+                bins=[0, 3, 6, 9, 12],
+                labels=['winter', 'spring', 'summer', 'fall'],
+                include_lowest=True
+            )
+            
+            # Convert to one-hot encoding
+            season_dummies = pd.get_dummies(df['season'], prefix='season')
+            
+            # Drop any existing season columns to avoid duplicates
+            df = df.drop(columns=[col for col in df.columns if col in season_columns], errors='ignore')
+            
+            # Add the new season columns
+            df = pd.concat([df, season_dummies], axis=1)
+    
+    # Add logarithmic features for runoff data
+    if 'runoff_nwm' in df.columns and 'log_runoff_nwm' not in df.columns:
+        df['log_runoff_nwm'] = np.log1p(df['runoff_nwm'])
+        
+        # Add lagged features if data is time ordered
+        if len(df) > 1 and 'datetime' in df.columns and 'runoff_nwm_lag1' not in df.columns:
+            df = df.sort_values('datetime')
+            df['runoff_nwm_lag1'] = df['runoff_nwm'].shift(1)
+            
+            # Replace NaN values from shift with the mean
+            df['runoff_nwm_lag1'] = df['runoff_nwm_lag1'].fillna(df['runoff_nwm'].mean())
+    
+    return df
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Make runoff predictions with trained model')
