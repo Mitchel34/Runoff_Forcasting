@@ -1,0 +1,12 @@
+tensorflow>=2.x
+numpy
+pandas
+matplotlib
+seaborn
+scikit-learn
+jupyter
+keras
+xarray
+netCDF4
+h5py
+tqdm
