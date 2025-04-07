@@ -99,16 +99,22 @@ python src/model.py --train
 ### Making Predictions
 ```
 python src/predict.py --input <input_file> --output <output_file>
+
+python src/predict.py --input data/processed/test_data.csv --output data/predictions/results.csv --model models/nwm_dl_model.keras
 ```
 
 ### Evaluation
 ```
 python src/evaluate.py --predictions <predictions_file> --observations <observations_file>
+
+python src/evaluate.py --predictions data/predictions/results.csv --observations data/processed/test_data.csv  
 ```
 
 ### Visualization
 ```
 python src/visualize.py --results <results_file>
+
+python src/visualize.py --predictions data/predictions/results.csv --observations data/processed/test_data.csv
 ```
 
 ## Notebooks
