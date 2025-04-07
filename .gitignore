@@ -1,8 +1,18 @@
 # Data files
 /data/folder1/**
 /data/folder2/**
-/data/processed/**
+/data/raw/*.csv
+/data/raw/*.nc
+/data/processed/*.csv
+/data/processed/train_validation_data.csv
+/data/processed/test_data.csv
+/data/processed/predictions.csv
 *.csv
+
+# Model files
+/models/*.keras
+/models/*.h5
+/models/nwm_dl_model.keras
 
 # Python artifacts
 __pycache__/

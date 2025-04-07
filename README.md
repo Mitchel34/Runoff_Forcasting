@@ -60,6 +60,13 @@ nwm_dl_postprocessing/
    pip install -r requirements.txt
    ```
 
+4. Download the data files (large files are not stored in the repository):
+   ```
+   python scripts/download_data.py
+   ```
+   
+   Alternatively, you can manually download the data files from [our data storage](https://link-to-your-data-storage) and place them in the appropriate directories.
+
 ## Data
 
 - **Training/Validation Data**: April 2021 to September 2022
@@ -68,6 +75,8 @@ nwm_dl_postprocessing/
 The data includes:
 - NWM forecasts with hourly predictions at 1-18 hour lead times
 - USGS observational runoff data for ground truth
+
+**Note**: Large data files are not stored directly in the repository. Use the download script to retrieve them.
 
 ## Model
 
