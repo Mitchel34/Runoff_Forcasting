@@ -4,15 +4,16 @@
 This project aims to improve the National Water Model (NWM) forecasts using deep learning techniques. By combining NWM forecasts with USGS observational data, we train models to correct systematic biases and improve runoff predictions across various watersheds.
 
 ## Directory Structure
-```
-nwm_dl_postprocessing/
+
+Runoff_Forcasting/
 ├── data/
-│   ├── raw/                           # Original data sources
-│   │   ├── nwm_forecasts.csv          # NWM forecasts (hourly, 1-18h lead)
-│   │   └── usgs_observations.csv      # USGS observed runoff data
+│   ├── folder1/                       # Data files (mix of USGS and NWM)
+│   │   └── *.csv                      # CSV data files
+│   ├── folder2/                       # Data files (mix of USGS and NWM)
+│   │   └── *.csv                      # CSV data files
 │   └── processed/                     # Cleaned and prepared datasets
-│       ├── train_validation_data.csv  # Data for training/validation (Apr 2021-Sep 2022)
-│       └── test_data.csv              # Data for testing (Oct 2022-Apr 2023)
+│       ├── train_validation_data.csv  # Data for training/validation
+│       └── test_data.csv              # Data for testing
 ├── models/
 │   └── nwm_dl_model.keras             # Saved model file
 ├── notebooks/
@@ -25,21 +26,8 @@ nwm_dl_postprocessing/
 │   ├── predict.py                     # Prediction script
 │   ├── evaluate.py                    # Model evaluation metrics
 │   └── visualize.py                   # Visualization utilities
-├── tests/
-│   ├── test_preprocess.py             # Tests for preprocessing
-│   └── test_model.py                  # Tests for model functionality
-├── reports/
-│   ├── figures/                       # Generated figures
-│   │   ├── runoff_boxplots.png        # Comparison boxplots
-│   │   └── metrics_boxplots.png       # Performance metrics
-│   └── technical_report.pdf           # Technical documentation
-├── presentation/
-│   ├── presentation_slides.pdf        # Presentation slides
-│   └── presentation_notes.md          # Speaker notes
 ├── requirements.txt                   # Project dependencies
-├── README.md                          # This file
-└── .gitignore                         # Git exclusions
-```
+└── README.md                          # This file
 
 ## Installation & Setup
 

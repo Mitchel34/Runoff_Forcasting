@@ -99,20 +99,37 @@ def evaluate_model(obs, nwm_pred, ml_pred):
     metrics : dict
         Dictionary of evaluation metrics
     """
+    # Filter out NaN values from all arrays
+    valid_indices = ~(np.isnan(obs) | np.isnan(nwm_pred) | np.isnan(ml_pred))
+    
+    if np.sum(valid_indices) == 0:
+        print("WARNING: No valid data points (all NaN) for evaluation")
+        return {
+            'NWM': {'CC': np.nan, 'RMSE': np.nan, 'PBIAS': np.nan, 'NSE': np.nan, 'MAE': np.nan},
+            'ML_Corrected': {'CC': np.nan, 'RMSE': np.nan, 'PBIAS': np.nan, 'NSE': np.nan, 'MAE': np.nan}
+        }
+    
+    # Use only valid data for evaluation
+    obs_valid = obs[valid_indices]
+    nwm_pred_valid = nwm_pred[valid_indices]
+    ml_pred_valid = ml_pred[valid_indices]
+    
+    print(f"Using {len(obs_valid)} valid data points out of {len(obs)} total")
+    
     metrics = {
         'NWM': {
-            'CC': correlation_coefficient(obs, nwm_pred),
-            'RMSE': rmse(obs, nwm_pred),
-            'PBIAS': pbias(obs, nwm_pred),
-            'NSE': nse(obs, nwm_pred),
-            'MAE': mean_absolute_error(obs, nwm_pred)
+            'CC': correlation_coefficient(obs_valid, nwm_pred_valid),
+            'RMSE': rmse(obs_valid, nwm_pred_valid),
+            'PBIAS': pbias(obs_valid, nwm_pred_valid),
+            'NSE': nse(obs_valid, nwm_pred_valid),
+            'MAE': mean_absolute_error(obs_valid, nwm_pred_valid)
         },
         'ML_Corrected': {
-            'CC': correlation_coefficient(obs, ml_pred),
-            'RMSE': rmse(obs, ml_pred),
-            'PBIAS': pbias(obs, ml_pred),
-            'NSE': nse(obs, ml_pred),
-            'MAE': mean_absolute_error(obs, ml_pred)
+            'CC': correlation_coefficient(obs_valid, ml_pred_valid),
+            'RMSE': rmse(obs_valid, ml_pred_valid),
+            'PBIAS': pbias(obs_valid, ml_pred_valid),
+            'NSE': nse(obs_valid, ml_pred_valid),
+            'MAE': mean_absolute_error(obs_valid, ml_pred_valid)
         }
     }
     
@@ -221,21 +238,79 @@ def main(predictions_file, observations_file):
     print(f"Loading observations from {observations_file}")
     obs_df = pd.read_csv(observations_file)
     
+    # Check what columns are available in the observation data
+    print(f"Columns in observations file: {list(obs_df.columns)}")
+    
+    # Determine the name of the column containing observed runoff values
+    observed_runoff_column = None
+    for possible_col in ['runoff_observed', 'runoff_usgs', 'observed_runoff']:
+        if possible_col in obs_df.columns:
+            observed_runoff_column = possible_col
+            print(f"Found observed runoff data in column: '{observed_runoff_column}'")
+            break
+    
+    if observed_runoff_column is None:
+        print("ERROR: Could not find a column with observed runoff data.")
+        print("Expected one of: 'runoff_observed', 'runoff_usgs', 'observed_runoff'")
+        print("Available columns:", list(obs_df.columns))
+        return
+    
+    # Rename column for consistency with the rest of the code
+    obs_df = obs_df.rename(columns={observed_runoff_column: 'runoff_observed'})
+    
     # Merge data
-    eval_df = pd.merge(
-        pred_df,
-        obs_df,
-        on=['datetime', 'station_id'],
-        how='inner'
-    )
+    try:
+        eval_df = pd.merge(
+            pred_df,
+            obs_df[['datetime', 'station_id', 'runoff_observed']],
+            on=['datetime', 'station_id'],
+            how='inner'
+        )
+        print(f"Merged data contains {len(eval_df)} rows")
+    except KeyError as e:
+        print(f"ERROR during merge: {e}")
+        print("Make sure both files have 'datetime' and 'station_id' columns")
+        print("Predictions columns:", list(pred_df.columns))
+        print("Observations columns:", list(obs_df.columns))
+        return
+    
+    # Check if we have data after merging
+    if len(eval_df) == 0:
+        print("ERROR: No matching data found after merging predictions and observations.")
+        print("Check that the datetime and station_id values match between files.")
+        return
     
     # Group by station for station-wise evaluation
     all_metrics = []
     
     for station_id, group in eval_df.groupby('station_id'):
         obs = group['runoff_observed'].values
-        nwm_pred = group['runoff_nwm'].values
-        ml_pred = group['runoff_predicted'].values
+        
+        # Check if 'runoff_nwm' exists in the data, otherwise use a fallback
+        if 'runoff_nwm' in group.columns:
+            nwm_pred = group['runoff_nwm'].values
+        else:
+            print(f"Warning: 'runoff_nwm' column not found for station {station_id}. Using zeros as placeholder.")
+            nwm_pred = np.zeros_like(obs)
+        
+        # Check if 'runoff_predicted' exists in the data
+        if 'runoff_predicted' in group.columns:
+            ml_pred = group['runoff_predicted'].values
+        else:
+            print(f"Error: 'runoff_predicted' column not found for station {station_id}. Cannot evaluate ML model.")
+            continue
+        
+        # Check how many NaN values we have
+        nan_count = np.sum(np.isnan(obs) | np.isnan(nwm_pred) | np.isnan(ml_pred))
+        total_count = len(obs)
+        
+        if nan_count > 0:
+            print(f"Station {station_id}: Found {nan_count} NaN values out of {total_count} entries ({nan_count/total_count:.2%})")
+            
+            # If too many NaN values, skip this station
+            if nan_count/total_count > 0.9:  # 90% threshold
+                print(f"Skipping station {station_id} due to too many NaN values")
+                continue
         
         metrics = evaluate_model(obs, nwm_pred, ml_pred)
         all_metrics.append(metrics)
@@ -243,14 +318,39 @@ def main(predictions_file, observations_file):
         print(f"\nStation ID: {station_id}")
         print_evaluation_metrics(metrics)
     
+    # Check if we have any valid metrics
+    if not all_metrics:
+        print("No valid metrics could be calculated for any station.")
+        return
+    
     # Plot metrics
     plot_metrics_boxplot(all_metrics)
     
     # Calculate and print aggregate metrics
     print("\nAggregate Metrics (All Stations):")
-    obs_all = eval_df['runoff_observed'].values
-    nwm_pred_all = eval_df['runoff_nwm'].values
-    ml_pred_all = eval_df['runoff_predicted'].values
+    
+    # Filter out NaN values for aggregate metrics
+    valid_rows = ~(
+        np.isnan(eval_df['runoff_observed']) | 
+        np.isnan(eval_df['runoff_predicted']) |
+        (np.isnan(eval_df['runoff_nwm']) if 'runoff_nwm' in eval_df.columns else False)
+    )
+    
+    if np.sum(valid_rows) == 0:
+        print("WARNING: No valid data points for aggregate metrics")
+        return
+    
+    filtered_df = eval_df[valid_rows]
+    
+    obs_all = filtered_df['runoff_observed'].values
+    ml_pred_all = filtered_df['runoff_predicted'].values
+    
+    if 'runoff_nwm' in filtered_df.columns:
+        nwm_pred_all = filtered_df['runoff_nwm'].values
+    else:
+        nwm_pred_all = np.zeros_like(obs_all)
+    
+    print(f"Using {len(filtered_df)} valid data points out of {len(eval_df)} total for aggregate metrics")
     
     metrics_all = evaluate_model(obs_all, nwm_pred_all, ml_pred_all)
     print_evaluation_metrics(metrics_all)
