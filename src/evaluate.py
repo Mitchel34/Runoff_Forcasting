@@ -1,260 +1,264 @@
-import pandas as pd
+"""
+Model evaluation module with hydrological metrics.
+"""
+import os
+import argparse
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import tensorflow as tf
-from sklearn.metrics import mean_squared_error, r2_score
-import pickle
-import os
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-# Create directories if they don't exist
-os.makedirs('../results/plots', exist_ok=True)
-os.makedirs('../results/metrics', exist_ok=True)
+def correlation_coefficient(obs, pred):
+    """
+    Calculate Pearson correlation coefficient.
+    
+    Parameters:
+    -----------
+    obs : numpy.ndarray
+        Observed values
+    pred : numpy.ndarray
+        Predicted values
+        
+    Returns:
+    --------
+    cc : float
+        Correlation coefficient
+    """
+    return np.corrcoef(obs, pred)[0, 1]
 
-def load_test_data_and_model():
+def rmse(obs, pred):
     """
-    Load test data and trained model
+    Calculate Root Mean Square Error.
+    
+    Parameters:
+    -----------
+    obs : numpy.ndarray
+        Observed values
+    pred : numpy.ndarray
+        Predicted values
+        
+    Returns:
+    --------
+    rmse : float
+        Root Mean Square Error
     """
-    print("Loading test data and model...")
-    
-    try:
-        # Load test data
-        test_data = pd.read_csv('../data/processed/test_data.csv')
-        test_data['date'] = pd.to_datetime(test_data['date'])
-        
-        # Load scaler
-        with open('../data/processed/scaler.pkl', 'rb') as f:
-            scaler = pickle.load(f)
-        
-        # Load model with custom_objects to resolve 'mse'
-        custom_objects = {'mse': tf.keras.losses.MeanSquaredError()}
-        model = tf.keras.models.load_model('../results/models/final_model.h5', custom_objects=custom_objects)
-        
-        return test_data, scaler, model
-    
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        print("Please run preprocess.py and model.py first")
-        return None, None, None
+    return np.sqrt(mean_squared_error(obs, pred))
 
-def create_test_sequences(test_data, seq_length, lead_times):
+def pbias(obs, pred):
     """
-    Create sequences for testing
+    Calculate Percent Bias.
+    
+    Parameters:
+    -----------
+    obs : numpy.ndarray
+        Observed values
+    pred : numpy.ndarray
+        Predicted values
+        
+    Returns:
+    --------
+    pbias : float
+        Percent Bias
     """
-    print("Creating test sequences...")
-    
-    features = ['runoff_nwm', 'runoff_usgs']
-    if 'precipitation' in test_data.columns:
-        features.append('precipitation')
-    
-    feature_data = test_data[features].values
-    
-    X_test = []
-    for i in range(len(test_data) - seq_length - max(lead_times)):
-        X_test.append(feature_data[i:i+seq_length])
-    
-    return np.array(X_test), features
+    return 100 * np.sum(pred - obs) / np.sum(obs)
 
-def generate_predictions(model, X_test, test_data, seq_length, lead_times, scaler):
+def nse(obs, pred):
     """
-    Generate predictions on test data
+    Calculate Nash-Sutcliffe Efficiency.
+    
+    Parameters:
+    -----------
+    obs : numpy.ndarray
+        Observed values
+    pred : numpy.ndarray
+        Predicted values
+        
+    Returns:
+    --------
+    nse : float
+        Nash-Sutcliffe Efficiency
     """
-    print("Generating predictions...")
-    
-    # Predict residuals
-    residuals_pred = model.predict(X_test)
-    
-    # Create a DataFrame to store results
-    results = []
-    
-    for i, lead in enumerate(lead_times):
-        # Get the start index for the predictions (accounting for sequence length)
-        start_idx = seq_length
-        
-        # Get the end index (limited by available test data)
-        end_idx = len(test_data) - max(lead_times)
-        
-        # Extract dates for this prediction window
-        dates = test_data['date'].iloc[start_idx+lead-1:end_idx+lead-1].reset_index(drop=True)
-        
-        # Get observed values
-        observed = test_data['runoff_usgs'].iloc[start_idx+lead-1:end_idx+lead-1].reset_index(drop=True)
-        
-        # Get NWM forecasts
-        nwm_forecast = test_data['runoff_nwm'].iloc[start_idx+lead-1:end_idx+lead-1].reset_index(drop=True)
-        
-        # Inverse transform if needed (if scaler was applied)
-        if 'runoff_nwm' in test_data.columns:
-            # Get residuals for this lead time
-            lead_residuals = residuals_pred[:, i]
-            
-            # Calculate corrected forecasts by adding predicted residuals to NWM forecasts
-            corrected_forecast = nwm_forecast + lead_residuals[:len(nwm_forecast)]
-            
-            # Store results
-            lead_results = pd.DataFrame({
-                'date': dates,
-                'lead_time': lead,
-                'observed': observed,
-                'nwm_forecast': nwm_forecast,
-                'corrected_forecast': corrected_forecast
-            })
-            
-            results.append(lead_results)
-    
-    # Combine results for all lead times
-    all_results = pd.concat(results, ignore_index=True)
-    
-    # Save results
-    all_results.to_csv('../results/predictions.csv', index=False)
-    
-    return all_results
+    return 1 - (np.sum((obs - pred) ** 2) / np.sum((obs - np.mean(obs)) ** 2))
 
-def compute_metrics(obs, pred):
+def evaluate_model(obs, nwm_pred, ml_pred):
     """
-    Compute evaluation metrics
-    - Coefficient of Correlation (CC)
-    - Root Mean Square Error (RMSE)
-    - Percent Bias (PBIAS)
-    - Nash-Sutcliffe Efficiency (NSE)
-    """
-    cc = np.corrcoef(obs, pred)[0, 1]
-    rmse = np.sqrt(mean_squared_error(obs, pred))
-    pbias = 100 * (np.sum(pred - obs) / np.sum(obs))
-    nse = 1 - (np.sum((obs - pred)**2) / np.sum((obs - np.mean(obs))**2))
+    Evaluate model performance with multiple metrics.
     
-    return cc, rmse, pbias, nse
+    Parameters:
+    -----------
+    obs : numpy.ndarray
+        Observed values
+    nwm_pred : numpy.ndarray
+        NWM predictions
+    ml_pred : numpy.ndarray
+        Machine learning corrected predictions
+        
+    Returns:
+    --------
+    metrics : dict
+        Dictionary of evaluation metrics
+    """
+    metrics = {
+        'NWM': {
+            'CC': correlation_coefficient(obs, nwm_pred),
+            'RMSE': rmse(obs, nwm_pred),
+            'PBIAS': pbias(obs, nwm_pred),
+            'NSE': nse(obs, nwm_pred),
+            'MAE': mean_absolute_error(obs, nwm_pred)
+        },
+        'ML_Corrected': {
+            'CC': correlation_coefficient(obs, ml_pred),
+            'RMSE': rmse(obs, ml_pred),
+            'PBIAS': pbias(obs, ml_pred),
+            'NSE': nse(obs, ml_pred),
+            'MAE': mean_absolute_error(obs, ml_pred)
+        }
+    }
+    
+    return metrics
 
-def evaluate_predictions(results):
+def print_evaluation_metrics(metrics):
     """
-    Evaluate predictions using metrics
+    Print evaluation metrics in a formatted table.
+    
+    Parameters:
+    -----------
+    metrics : dict
+        Dictionary of evaluation metrics
     """
-    print("Evaluating predictions...")
+    print("Evaluation Metrics:")
+    print("-" * 50)
+    print(f"{'Metric':<10}{'NWM':<15}{'ML Corrected':<15}{'Improvement (%)':<15}")
+    print("-" * 50)
     
-    # Get unique lead times
-    lead_times = results['lead_time'].unique()
-    
-    # Create DataFrames to store metrics
-    metrics_df = pd.DataFrame(index=lead_times, columns=[
-        'cc_nwm', 'rmse_nwm', 'pbias_nwm', 'nse_nwm',
-        'cc_corrected', 'rmse_corrected', 'pbias_corrected', 'nse_corrected'
-    ])
-    
-    for lead in lead_times:
-        # Filter data for this lead time
-        lead_data = results[results['lead_time'] == lead]
+    for metric in ['CC', 'RMSE', 'PBIAS', 'NSE', 'MAE']:
+        nwm_value = metrics['NWM'][metric]
+        ml_value = metrics['ML_Corrected'][metric]
         
-        # Compute metrics for NWM forecasts
-        cc_nwm, rmse_nwm, pbias_nwm, nse_nwm = compute_metrics(
-            lead_data['observed'].values, lead_data['nwm_forecast'].values
-        )
+        # Calculate improvement percentage (higher is better for CC and NSE, lower is better for others)
+        if metric in ['CC', 'NSE']:
+            improvement = ((ml_value - nwm_value) / abs(nwm_value)) * 100 if nwm_value != 0 else np.inf
+        else:
+            improvement = ((nwm_value - ml_value) / nwm_value) * 100 if nwm_value != 0 else np.inf
         
-        # Compute metrics for corrected forecasts
-        cc_corr, rmse_corr, pbias_corr, nse_corr = compute_metrics(
-            lead_data['observed'].values, lead_data['corrected_forecast'].values
-        )
-        
-        # Store metrics
-        metrics_df.loc[lead, 'cc_nwm'] = cc_nwm
-        metrics_df.loc[lead, 'rmse_nwm'] = rmse_nwm
-        metrics_df.loc[lead, 'pbias_nwm'] = pbias_nwm
-        metrics_df.loc[lead, 'nse_nwm'] = nse_nwm
-        
-        metrics_df.loc[lead, 'cc_corrected'] = cc_corr
-        metrics_df.loc[lead, 'rmse_corrected'] = rmse_corr
-        metrics_df.loc[lead, 'pbias_corrected'] = pbias_corr
-        metrics_df.loc[lead, 'nse_corrected'] = nse_corr
+        print(f"{metric:<10}{nwm_value:<15.4f}{ml_value:<15.4f}{improvement:<15.2f}")
     
-    # Save metrics
-    metrics_df.to_csv('../results/metrics/evaluation_metrics.csv')
-    
-    return metrics_df
+    print("-" * 50)
 
-def create_boxplots(results, metrics_df):
+def plot_metrics_boxplot(all_metrics, by_watershed=False):
     """
-    Create boxplots for visualization
-    """
-    print("Creating visualizations...")
+    Create box plots of evaluation metrics.
     
-    # 1. Box-plot of Observed, NWM, and Corrected Runoff
-    plt.figure(figsize=(10, 6))
-    data_to_plot = [
-        results['observed'].values,
-        results['nwm_forecast'].values,
-        results['corrected_forecast'].values
-    ]
-    sns.boxplot(data=data_to_plot)
-    plt.xticks([0, 1, 2], ['Observed', 'NWM', 'Corrected'])
-    plt.title('Distribution of Runoff Values')
-    plt.ylabel('Runoff')
+    Parameters:
+    -----------
+    all_metrics : list of dict
+        List of metric dictionaries for different stations/time periods
+    by_watershed : bool
+        Whether to group by watershed
+        
+    Returns:
+    --------
+    None, saves figure to disk
+    """
+    # Convert metrics to DataFrame
+    metrics_df = []
+    
+    for i, metrics in enumerate(all_metrics):
+        for model_type in ['NWM', 'ML_Corrected']:
+            for metric_name, value in metrics[model_type].items():
+                metrics_df.append({
+                    'Station': i,
+                    'Model': model_type,
+                    'Metric': metric_name,
+                    'Value': value
+                })
+    
+    metrics_df = pd.DataFrame(metrics_df)
+    
+    # Create directory for figures
+    reports_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'reports')
+    figures_dir = os.path.join(reports_dir, 'figures')
+    os.makedirs(figures_dir, exist_ok=True)
+    
+    # Plot boxplots for each metric
+    metrics_to_plot = ['CC', 'RMSE', 'PBIAS', 'NSE']
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    axes = axes.flatten()
+    
+    for i, metric in enumerate(metrics_to_plot):
+        metric_df = metrics_df[metrics_df['Metric'] == metric]
+        
+        sns.boxplot(x='Metric', y='Value', hue='Model', data=metric_df, ax=axes[i])
+        axes[i].set_title(f"{metric} Distribution")
+        axes[i].set_xlabel('')
+        
+        # Set y-axis limits based on metric
+        if metric == 'NSE':
+            axes[i].set_ylim(-0.5, 1.0)
+        elif metric == 'CC':
+            axes[i].set_ylim(0, 1.0)
+    
     plt.tight_layout()
-    plt.savefig('../results/plots/runoff_boxplot.png', dpi=300)
-    
-    # 2. Box-plots of metrics by lead time
-    metrics = [
-        ('CC', ['cc_nwm', 'cc_corrected']),
-        ('RMSE', ['rmse_nwm', 'rmse_corrected']),
-        ('PBIAS', ['pbias_nwm', 'pbias_corrected']),
-        ('NSE', ['nse_nwm', 'nse_corrected'])
-    ]
-    
-    for metric_name, columns in metrics:
-        plt.figure(figsize=(12, 6))
-        
-        # Reshape data for seaborn
-        plot_data = pd.DataFrame({
-            'Lead Time': metrics_df.index.repeat(2),
-            'Model': ['NWM'] * len(metrics_df) + ['Corrected'] * len(metrics_df),
-            'Value': metrics_df[columns[0]].values.tolist() + metrics_df[columns[1]].values.tolist()
-        })
-        
-        sns.boxplot(x='Lead Time', y='Value', hue='Model', data=plot_data)
-        plt.title(f'{metric_name} by Lead Time')
-        plt.xlabel('Lead Time (hours)')
-        plt.ylabel(metric_name)
-        plt.tight_layout()
-        plt.savefig(f'../results/plots/{metric_name.lower()}_by_leadtime.png', dpi=300)
-    
-    # 3. Time series plot for a sample lead time (e.g., 6 hours)
-    lead_time_sample = 6
-    sample_data = results[results['lead_time'] == lead_time_sample].iloc[:500]  # Limit to 500 points for clarity
-    
-    plt.figure(figsize=(15, 6))
-    plt.plot(sample_data['date'], sample_data['observed'], label='Observed', color='black')
-    plt.plot(sample_data['date'], sample_data['nwm_forecast'], label='NWM Forecast', color='blue', alpha=0.7)
-    plt.plot(sample_data['date'], sample_data['corrected_forecast'], label='Corrected Forecast', color='red', alpha=0.7)
-    plt.title(f'Time Series Comparison (Lead Time: {lead_time_sample} hours)')
-    plt.xlabel('Date')
-    plt.ylabel('Runoff')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig('../results/plots/timeseries_comparison.png', dpi=300)
+    plt.savefig(os.path.join(figures_dir, 'metrics_boxplots.png'))
+    plt.close()
 
-def main():
-    # Load test data and model
-    test_data, scaler, model = load_test_data_and_model()
-    if test_data is None:
-        return
+def main(predictions_file, observations_file):
+    """
+    Main evaluation function.
     
-    # Define parameters
-    seq_length = 24
-    lead_times = range(1, 19)  # 1-18 hours
+    Parameters:
+    -----------
+    predictions_file : str
+        Path to predictions CSV file
+    observations_file : str
+        Path to observations CSV file
+    """
+    # Load data
+    print(f"Loading predictions from {predictions_file}")
+    pred_df = pd.read_csv(predictions_file)
     
-    # Create test sequences
-    X_test, features = create_test_sequences(test_data, seq_length, lead_times)
+    print(f"Loading observations from {observations_file}")
+    obs_df = pd.read_csv(observations_file)
     
-    # Generate predictions
-    results = generate_predictions(model, X_test, test_data, seq_length, lead_times, scaler)
+    # Merge data
+    eval_df = pd.merge(
+        pred_df,
+        obs_df,
+        on=['datetime', 'station_id'],
+        how='inner'
+    )
     
-    # Evaluate predictions
-    metrics_df = evaluate_predictions(results)
+    # Group by station for station-wise evaluation
+    all_metrics = []
     
-    # Create visualizations
-    create_boxplots(results, metrics_df)
+    for station_id, group in eval_df.groupby('station_id'):
+        obs = group['runoff_observed'].values
+        nwm_pred = group['runoff_nwm'].values
+        ml_pred = group['runoff_predicted'].values
+        
+        metrics = evaluate_model(obs, nwm_pred, ml_pred)
+        all_metrics.append(metrics)
+        
+        print(f"\nStation ID: {station_id}")
+        print_evaluation_metrics(metrics)
     
-    print("Evaluation completed successfully.")
-    print(f"Results saved to '../results/' directory")
+    # Plot metrics
+    plot_metrics_boxplot(all_metrics)
+    
+    # Calculate and print aggregate metrics
+    print("\nAggregate Metrics (All Stations):")
+    obs_all = eval_df['runoff_observed'].values
+    nwm_pred_all = eval_df['runoff_nwm'].values
+    ml_pred_all = eval_df['runoff_predicted'].values
+    
+    metrics_all = evaluate_model(obs_all, nwm_pred_all, ml_pred_all)
+    print_evaluation_metrics(metrics_all)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Evaluate model performance')
+    parser.add_argument('--predictions', type=str, required=True, help='Path to predictions CSV file')
+    parser.add_argument('--observations', type=str, required=True, help='Path to observations CSV file')
+    args = parser.parse_args()
+    
+    main(args.predictions, args.observations)

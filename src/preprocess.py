@@ -1,175 +1,237 @@
+"""
+Data preprocessing module for NWM runoff forecasting.
+Handles loading, cleaning, and preparing data for model training.
+"""
+import os
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-import os
-import pickle
 
-# Create results directory if it doesn't exist
-os.makedirs('../data/processed', exist_ok=True)
+def load_data(nwm_file, usgs_file):
+    """
+    Load NWM forecast and USGS observation data.
+    
+    Parameters:
+    -----------
+    nwm_file : str
+        Path to NWM forecast CSV file
+    usgs_file : str
+        Path to USGS observations CSV file
+        
+    Returns:
+    --------
+    nwm_df : pandas.DataFrame
+        DataFrame containing NWM forecasts
+    usgs_df : pandas.DataFrame
+        DataFrame containing USGS observations
+    """
+    print(f"Loading NWM data from {nwm_file}")
+    nwm_df = pd.read_csv(nwm_file, parse_dates=['datetime'])
+    
+    print(f"Loading USGS data from {usgs_file}")
+    usgs_df = pd.read_csv(usgs_file, parse_dates=['datetime'])
+    
+    return nwm_df, usgs_df
 
-def load_data():
+def align_data(nwm_df, usgs_df):
     """
-    Load NWM forecasts and USGS observed runoff data from multiple files
+    Align NWM forecasts with USGS observations based on datetime and station ID.
+    
+    Parameters:
+    -----------
+    nwm_df : pandas.DataFrame
+        DataFrame containing NWM forecasts
+    usgs_df : pandas.DataFrame
+        DataFrame containing USGS observations
+        
+    Returns:
+    --------
+    aligned_df : pandas.DataFrame
+        DataFrame with aligned NWM forecasts and USGS observations
     """
-    print("Loading data...")
-    try:
-        # Load and combine NWM forecast data from folder1 (stream ID: 20380357)
-        nwm_data_list1 = []
-        folder1_path = '../data/folder1'
-        for file in os.listdir(folder1_path):
-            if file.startswith('streamflow_20380357_') and file.endswith('.csv'):
-                file_path = os.path.join(folder1_path, file)
-                df = pd.read_csv(file_path)
-                df['station_id'] = '20380357'
-                nwm_data_list1.append(df)
+    print("Aligning NWM forecasts with USGS observations")
+    # Merge on datetime and station/gauge ID
+    aligned_df = pd.merge(
+        nwm_df, 
+        usgs_df,
+        on=['datetime', 'station_id'],
+        how='inner',
+        suffixes=('_nwm', '_usgs')
+    )
+    
+    print(f"Aligned data shape: {aligned_df.shape}")
+    return aligned_df
 
-        # Load and combine NWM forecast data from folder2 (stream ID: 21609641)
-        nwm_data_list2 = []
-        folder2_path = '../data/folder2'
-        for file in os.listdir(folder2_path):
-            if file.startswith('streamflow_21609641_') and file.endswith('.csv'):
-                file_path = os.path.join(folder2_path, file)
-                df = pd.read_csv(file_path)
-                df['station_id'] = '21609641'
-                nwm_data_list2.append(df)
+def create_features(df):
+    """
+    Create additional features for the model.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with aligned data
         
-        # Combine all NWM data
-        nwm_data = pd.concat(nwm_data_list1 + nwm_data_list2, ignore_index=True)
-        
-        # Rename columns to match expected format in the rest of the script
-        nwm_data = nwm_data.rename(columns={
-            'model_output_valid_time': 'date',
-            'streamflow_value': 'runoff_nwm',
-            'streamID': 'stream_id'
-        })
-        
-        # Load USGS data
-        usgs_data1 = pd.read_csv('../data/folder1/09520500_Strt_2021-04-20_EndAt_2023-04-21.csv')
-        usgs_data1['station_id'] = '20380357'  # Associate with corresponding NWM station
-        
-        usgs_data2 = pd.read_csv('../data/folder2/11266500_Strt_2021-04-20_EndAt_2023-04-21.csv')
-        usgs_data2['station_id'] = '21609641'  # Associate with corresponding NWM station
-        
-        # Combine USGS data
-        usgs_data = pd.concat([usgs_data1, usgs_data2], ignore_index=True)
-        
-        # Rename columns to match expected format
-        usgs_data = usgs_data.rename(columns={
-            'DateTime': 'date',
-            'USGSFlowValue': 'runoff_usgs'
-        })
-        
-        return nwm_data, usgs_data
-    except Exception as e:
-        print(f"Error: {e}")
-        print("Please ensure that the data files exist in the data directory with the expected structure.")
-        return None, None
+    Returns:
+    --------
+    df : pandas.DataFrame
+        DataFrame with additional features
+    """
+    print("Creating additional features")
+    
+    # Extract time-based features
+    df['hour'] = df['datetime'].dt.hour
+    df['day'] = df['datetime'].dt.day
+    df['month'] = df['datetime'].dt.month
+    df['dayofweek'] = df['datetime'].dt.dayofweek
+    df['is_weekend'] = df['dayofweek'].isin([5, 6]).astype(int)
+    
+    # Calculate error metrics
+    df['nwm_error'] = df['runoff_nwm'] - df['runoff_usgs']
+    df['nwm_error_pct'] = (df['nwm_error'] / df['runoff_usgs']) * 100
+    
+    return df
 
-def clean_data(nwm_data, usgs_data):
+def split_data(df, test_start_date='2022-10-01'):
     """
-    Clean and preprocess the data
+    Split data into training, validation, and test sets.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        Preprocessed DataFrame
+    test_start_date : str
+        Start date for test data (default: '2022-10-01')
+        
+    Returns:
+    --------
+    train_df : pandas.DataFrame
+        Training data
+    val_df : pandas.DataFrame
+        Validation data
+    test_df : pandas.DataFrame
+        Test data
     """
-    print("Cleaning data...")
-    
-    # Process NWM data
-    nwm_data['date'] = pd.to_datetime(nwm_data['date'].str.replace('_', ' '))
-    
-    # Process USGS data
-    usgs_data['date'] = pd.to_datetime(usgs_data['date'])
-    
-    # Convert both to naive datetime (no timezone) to fix the merge issue
-    if nwm_data['date'].dt.tz is not None:
-        nwm_data['date'] = nwm_data['date'].dt.tz_localize(None)
-    
-    if usgs_data['date'].dt.tz is not None:
-        usgs_data['date'] = usgs_data['date'].dt.tz_localize(None)
-    
-    print("NWM date type:", nwm_data['date'].dtype)
-    print("USGS date type:", usgs_data['date'].dtype)
-    
-    # Merge data by date and station ID
-    merged_data = pd.merge(nwm_data, usgs_data, on=['date', 'station_id'])
-    
-    # Handle missing values (interpolate)
-    merged_data = merged_data.interpolate(method='linear')
-    
-    # Drop any remaining rows with missing values
-    merged_data = merged_data.dropna(subset=['runoff_nwm', 'runoff_usgs'])
-    
-    return merged_data
-
-def split_data(data):
-    """
-    Split data into training/validation and testing sets
-    - Training/Validation: April 2021 - September 2022
-    - Testing: October 2022 - April 2023
-    """
-    print("Splitting data...")
+    print(f"Splitting data with test set starting from {test_start_date}")
     
     # Split based on date
-    train_val_data = data[data['date'] < '2022-10-01'].copy()
-    test_data = data[data['date'] >= '2022-10-01'].copy()
+    train_val_df = df[df['datetime'] < test_start_date].copy()
+    test_df = df[df['datetime'] >= test_start_date].copy()
     
-    return train_val_data, test_data
+    # Further split training data into train/validation
+    train_df, val_df = train_test_split(train_val_df, test_size=0.2, random_state=42)
+    
+    print(f"Training set: {train_df.shape[0]} samples")
+    print(f"Validation set: {val_df.shape[0]} samples")
+    print(f"Test set: {test_df.shape[0]} samples")
+    
+    return train_df, val_df, test_df
 
-def normalize_data(train_val_data, test_data):
+def scale_data(train_df, val_df, test_df, feature_columns, target_column):
     """
-    Normalize features using StandardScaler
+    Scale features using StandardScaler.
+    
+    Parameters:
+    -----------
+    train_df, val_df, test_df : pandas.DataFrame
+        Training, validation, and test DataFrames
+    feature_columns : list
+        List of feature column names
+    target_column : str
+        Target column name
+        
+    Returns:
+    --------
+    X_train, X_val, X_test : numpy.ndarray
+        Scaled feature arrays
+    y_train, y_val, y_test : numpy.ndarray
+        Target arrays
+    scaler_X, scaler_y : sklearn.preprocessing.StandardScaler
+        Fitted scalers for features and target
     """
-    print("Normalizing data...")
+    print("Scaling data")
     
-    # Initialize scaler
-    scaler = StandardScaler()
+    # Initialize scalers
+    scaler_X = StandardScaler()
+    scaler_y = StandardScaler()
     
-    # Select features for normalization (runoff, precipitation if available)
-    features = ['runoff_nwm', 'runoff_usgs']
-    if 'precipitation' in train_val_data.columns:
-        features.append('precipitation')
+    # Fit scalers on training data
+    X_train = scaler_X.fit_transform(train_df[feature_columns])
+    y_train = scaler_y.fit_transform(train_df[[target_column]])
     
-    # Fit scaler on training data and transform both sets
-    train_val_scaled = train_val_data.copy()
-    test_scaled = test_data.copy()
+    # Transform validation and test data
+    X_val = scaler_X.transform(val_df[feature_columns])
+    y_val = scaler_y.transform(val_df[[target_column]])
     
-    train_val_scaled[features] = scaler.fit_transform(train_val_data[features])
-    test_scaled[features] = scaler.transform(test_data[features])
+    X_test = scaler_X.transform(test_df[feature_columns])
+    y_test = scaler_y.transform(test_df[[target_column]])
     
-    # Save the scaler for later use
-    with open('../data/processed/scaler.pkl', 'wb') as f:
-        pickle.dump(scaler, f)
-    
-    return train_val_scaled, test_scaled, features, scaler
+    return X_train, X_val, X_test, y_train, y_val, y_test, scaler_X, scaler_y
 
-def save_processed_data(train_val_data, test_data):
+def prepare_sequence_data(X, y, sequence_length):
     """
-    Save preprocessed data to CSV files
-    """
-    print("Saving preprocessed data...")
+    Prepare sequential data for recurrent neural networks.
     
-    train_val_data.to_csv('../data/processed/train_val_data.csv', index=False)
-    test_data.to_csv('../data/processed/test_data.csv', index=False)
+    Parameters:
+    -----------
+    X : numpy.ndarray
+        Feature array
+    y : numpy.ndarray
+        Target array
+    sequence_length : int
+        Length of sequences to create
+        
+    Returns:
+    --------
+    X_seq : numpy.ndarray
+        Sequence feature array of shape (samples, sequence_length, features)
+    y_seq : numpy.ndarray
+        Target array corresponding to sequences
+    """
+    print(f"Creating sequences with length {sequence_length}")
+    
+    X_seq, y_seq = [], []
+    
+    for i in range(len(X) - sequence_length):
+        X_seq.append(X[i:i+sequence_length])
+        y_seq.append(y[i+sequence_length])
+    
+    return np.array(X_seq), np.array(y_seq)
 
 def main():
-    # Load data
-    nwm_data, usgs_data = load_data()
-    if nwm_data is None or usgs_data is None:
-        return
+    """
+    Main preprocessing pipeline.
+    """
+    # Define paths
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+    raw_dir = os.path.join(data_dir, 'raw')
+    processed_dir = os.path.join(data_dir, 'processed')
     
-    # Clean data
-    merged_data = clean_data(nwm_data, usgs_data)
+    # Ensure directories exist
+    os.makedirs(processed_dir, exist_ok=True)
+    
+    # Define file paths
+    nwm_file = os.path.join(raw_dir, 'nwm_forecasts.csv')
+    usgs_file = os.path.join(raw_dir, 'usgs_observations.csv')
+    
+    # Load data
+    nwm_df, usgs_df = load_data(nwm_file, usgs_file)
+    
+    # Align data
+    aligned_df = align_data(nwm_df, usgs_df)
+    
+    # Create features
+    df = create_features(aligned_df)
     
     # Split data
-    train_val_data, test_data = split_data(merged_data)
-    
-    # Normalize data
-    train_val_scaled, test_scaled, features, scaler = normalize_data(train_val_data, test_data)
+    train_df, val_df, test_df = split_data(df)
     
     # Save processed data
-    save_processed_data(train_val_scaled, test_scaled)
+    train_val_df = pd.concat([train_df, val_df])
+    train_val_df.to_csv(os.path.join(processed_dir, 'train_validation_data.csv'), index=False)
+    test_df.to_csv(os.path.join(processed_dir, 'test_data.csv'), index=False)
     
-    print("Data preprocessing completed successfully.")
-    print(f"Training/Validation samples: {len(train_val_scaled)}")
-    print(f"Testing samples: {len(test_scaled)}")
-    print(f"Features used: {features}")
+    print("Preprocessing completed. Data saved to processed directory.")
 
 if __name__ == "__main__":
     main()
