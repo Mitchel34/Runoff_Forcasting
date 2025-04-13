@@ -97,6 +97,113 @@ jupyter
 - Modular scripts and unit tests enhance maintainability and ease of collaboration.
 
 ---
+
+## Quickstart Guide
+
+This guide will help you set up and run the NWM Runoff Forecast Correction project.
+
+### Prerequisites
+- Python 3.8+ installed
+- Git (for cloning the repository)
+- Sufficient disk space for data (~500MB)
+- (Optional) CUDA-compatible GPU for faster model training
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/yourusername/nwm-runoff-forecast-correction.git
+cd nwm-runoff-forecast-correction
+```
+
+### 2. Set Up a Python Virtual Environment
+```bash
+# Create a virtual environment
+python -m venv nwm_env
+
+# Activate the virtual environment
+# On Windows:
+nwm_env\Scripts\activate
+# On macOS/Linux:
+source nwm_env/bin/activate
+```
+
+### 3. Install Dependencies
+```bash
+# Install required packages
+pip install -r nwm_dl_postprocessing/requirements.txt
+```
+
+### 4. Prepare the Data
+```bash
+# Create the required directory structure if it doesn't exist
+mkdir -p nwm_dl_postprocessing/data/raw/20380357
+mkdir -p nwm_dl_postprocessing/data/raw/21609641
+mkdir -p nwm_dl_postprocessing/data/processed
+
+# Copy raw data files to their respective directories
+cp -r 20380357/* nwm_dl_postprocessing/data/raw/20380357/
+cp -r 21609641/* nwm_dl_postprocessing/data/raw/21609641/
+
+# Process the raw data
+python -m nwm_dl_postprocessing.src.preprocess
+```
+
+### 5. Explore the Data (Optional)
+```bash
+# Launch Jupyter to explore data and model development notebooks
+cd nwm_dl_postprocessing
+jupyter notebook notebooks/exploratory_analysis.ipynb
+```
+
+### 6. Train the Model
+```bash
+# Option 1: Run the training script directly
+python -m nwm_dl_postprocessing.src.model
+
+# Option 2: Use the provided shell script (Unix/macOS)
+bash nwm_dl_postprocessing/train_models.sh
+```
+
+### 7. Evaluate Model Performance
+```bash
+# Generate predictions on test set
+python -m nwm_dl_postprocessing.src.predict
+
+# Calculate evaluation metrics
+python -m nwm_dl_postprocessing.src.evaluate
+
+# Generate visualization plots
+python -m nwm_dl_postprocessing.src.visualize
+```
+
+### 8. View Results
+Results and visualizations will be saved in the `nwm_dl_postprocessing/reports/figures/` directory.
+
+### Common Issues and Solutions
+
+1. **Missing Data Files**: Ensure all raw data files are correctly placed in their respective directories.
+
+2. **Memory Errors During Processing**: For large datasets, consider processing in smaller batches or use a machine with more RAM.
+
+3. **CUDA/GPU Issues**: If encountering GPU-related errors, try forcing CPU usage by setting:
+   ```bash
+   export CUDA_VISIBLE_DEVICES=-1
+   ```
+
+4. **TimeSeriesSplit Warnings**: These are expected during hyperparameter tuning and can be safely ignored.
+
+### Running Tests
+```bash
+# Run all tests
+python -m unittest discover nwm_dl_postprocessing/tests
+
+# Run specific test file
+python -m unittest nwm_dl_postprocessing.tests.test_preprocess
+```
+
+For more detailed information, refer to the project structure and task sections below.
+
+---
+
 # Deep Learning for Improved Runoff Forecasting
 
 ## Introduction and Context
