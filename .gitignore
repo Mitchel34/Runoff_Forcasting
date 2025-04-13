@@ -1,0 +1,61 @@
+# Python virtual environment
+nwm_env/
+env/
+venv/
+ENV/
+.env
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook checkpoints and metadata
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+.jupyter/
+
+# Model checkpoints and large data files
+*.h5
+*.keras
+*.pkl
+*.joblib
+*.model
+*.tfevents.*
+/nwm_dl_postprocessing/data/processed/*.csv
+/nwm_dl_postprocessing/models/*
+!/nwm_dl_postprocessing/models/.gitkeep
+
+# Logs and temporary files
+logs/
+*.log
+tmp/
+temp/
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# TensorFlow and Keras Tuner specific files
+.keras_tuner/
+logs/
+tb_logs/
+
+# OS specific files
+.DS_Store
+._*
+Thumbs.db
+.Spotlight-V100
+.Trashes

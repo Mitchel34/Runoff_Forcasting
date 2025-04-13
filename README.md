@@ -132,18 +132,8 @@ source nwm_env/bin/activate
 pip install -r nwm_dl_postprocessing/requirements.txt
 ```
 
-### 4. Prepare the Data
-```bash
-# Create the required directory structure if it doesn't exist
-mkdir -p nwm_dl_postprocessing/data/raw/20380357
-mkdir -p nwm_dl_postprocessing/data/raw/21609641
-mkdir -p nwm_dl_postprocessing/data/processed
-
-# Copy raw data files to their respective directories
-cp -r 20380357/* nwm_dl_postprocessing/data/raw/20380357/
-cp -r 21609641/* nwm_dl_postprocessing/data/raw/21609641/
-
 # Process the raw data
+``` bash
 python -m nwm_dl_postprocessing.src.preprocess
 ```
 
