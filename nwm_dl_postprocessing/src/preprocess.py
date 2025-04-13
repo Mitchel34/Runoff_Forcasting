@@ -1,14 +1,14 @@
 import os
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
+from glob import glob
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
 
 class DataPreprocessor:
     """
-    Class for loading, cleaning, and preparing NWM and USGS data for model training.
-    Handles time alignment, missing value handling, feature engineering, and data splitting.
+    Class for loading, cleaning, and preparing NWM and USGS data for model training and evaluation.
+    Handles feature engineering, sequence creation, and data splitting.
     """
     
     def __init__(self, raw_data_path, processed_data_path, sequence_length=24):
@@ -18,298 +18,388 @@ class DataPreprocessor:
         Parameters:
         -----------
         raw_data_path : str
-            Path to the directory containing raw data files
+            Path to raw data directory containing NWM and USGS files
         processed_data_path : str
-            Path to save processed data files
-        sequence_length : int
-            Length of input sequence for the encoder (default: 24 hours)
+            Path to save processed data
+        sequence_length : int, optional
+            Length of historical sequence for encoder input
         """
         self.raw_data_path = raw_data_path
         self.processed_data_path = processed_data_path
         self.sequence_length = sequence_length
-        self.scaler = None
         
-        # Ensure processed directory exists
+        # Create processed data directory if it doesn't exist
         os.makedirs(processed_data_path, exist_ok=True)
     
     def load_usgs_data(self, stream_id):
-        """Load USGS observed runoff data for a specific stream"""
-        usgs_files = [f for f in os.listdir(os.path.join(self.raw_data_path, str(stream_id))) 
-                      if f.endswith('_Strt_*.csv')]
+        """
+        Load USGS observed runoff data for a stream.
         
+        Parameters:
+        -----------
+        stream_id : str
+            Stream identifier
+            
+        Returns:
+        --------
+        usgs_df : pandas.DataFrame
+            DataFrame with USGS observed runoff
+        """
+        usgs_files = glob(os.path.join(self.raw_data_path, str(stream_id), "*_Strt_*.csv"))
         if not usgs_files:
             raise FileNotFoundError(f"No USGS data files found for stream {stream_id}")
         
-        usgs_df = pd.read_csv(os.path.join(self.raw_data_path, str(stream_id), usgs_files[0]))
-        # Assuming the USGS file has datetime and value columns
+        usgs_df = pd.read_csv(usgs_files[0])
+        # Convert to datetime
         usgs_df['datetime'] = pd.to_datetime(usgs_df['datetime'])
         usgs_df.set_index('datetime', inplace=True)
         
         return usgs_df
     
     def load_nwm_data(self, stream_id):
-        """Load NWM forecast data for a specific stream"""
-        nwm_files = [f for f in os.listdir(os.path.join(self.raw_data_path, str(stream_id))) 
-                     if f.startswith('streamflow_')]
+        """
+        Load NWM forecast data for a stream.
         
+        Parameters:
+        -----------
+        stream_id : str
+            Stream identifier
+            
+        Returns:
+        --------
+        nwm_df : pandas.DataFrame
+            DataFrame with NWM forecast data
+        """
+        nwm_files = glob(os.path.join(self.raw_data_path, str(stream_id), "streamflow_*.csv"))
         if not nwm_files:
             raise FileNotFoundError(f"No NWM data files found for stream {stream_id}")
         
-        # Read and combine all NWM monthly files
         dfs = []
         for file in nwm_files:
-            df = pd.read_csv(os.path.join(self.raw_data_path, str(stream_id), file))
+            df = pd.read_csv(file)
             dfs.append(df)
         
         nwm_df = pd.concat(dfs, ignore_index=True)
-        # Assuming the NWM files have reference_time, value_time, and lead time columns
         nwm_df['reference_time'] = pd.to_datetime(nwm_df['reference_time'])
         nwm_df['value_time'] = pd.to_datetime(nwm_df['value_time'])
         
         return nwm_df
     
-    def align_data(self, usgs_df, nwm_df):
-        """Align NWM forecasts and USGS observations by datetime"""
+    def clean_and_align_data(self, usgs_df, nwm_df):
+        """
+        Clean and align USGS and NWM data.
         
-        # Restructure NWM data by lead time
-        lead_time_dfs = {}
-        for lead in range(1, 19):  # 1-18 hour lead times
-            # Filter for specific lead time
+        Parameters:
+        -----------
+        usgs_df : pandas.DataFrame
+            DataFrame with USGS observed runoff
+        nwm_df : pandas.DataFrame
+            DataFrame with NWM forecast data
+            
+        Returns:
+        --------
+        aligned_df : pandas.DataFrame
+            DataFrame with aligned USGS observations and NWM forecasts
+        """
+        # Create a DataFrame with USGS observations
+        aligned_df = pd.DataFrame({'usgs_observed': usgs_df['value']})
+        
+        # Add NWM forecasts for each lead time
+        for lead in range(1, 19):  # Lead times 1-18 hours
+            # Filter forecasts for this lead time
             lead_df = nwm_df[nwm_df['lead_time'] == lead].copy()
-            # Index by value_time (when the prediction is for)
+            
+            # Set index to value_time (when the forecast is for)
             lead_df.set_index('value_time', inplace=True)
-            # Select only the streamflow column
-            lead_df = lead_df[['streamflow']]
-            lead_df.rename(columns={'streamflow': f'nwm_lead_{lead}'}, inplace=True)
-            lead_time_dfs[lead] = lead_df
+            
+            # Add to aligned data with descriptive column name
+            aligned_df[f'nwm_lead_{lead}'] = lead_df['streamflow']
         
-        # Combine all lead times with USGS observations
-        aligned_df = usgs_df.rename(columns={'value': 'usgs_observed'})
+        # Calculate forecast errors (residuals)
+        for lead in range(1, 19):
+            col_name = f'nwm_lead_{lead}'
+            if col_name in aligned_df.columns:
+                aligned_df[f'error_lead_{lead}'] = aligned_df[col_name] - aligned_df['usgs_observed']
         
-        for lead, lead_df in lead_time_dfs.items():
-            aligned_df = aligned_df.join(lead_df, how='outer')
+        # Drop any rows with missing values
+        aligned_df.dropna(inplace=True)
         
         return aligned_df
     
-    def calculate_errors(self, df):
-        """Calculate NWM forecast errors for each lead time"""
-        for lead in range(1, 19):
-            df[f'error_lead_{lead}'] = df[f'nwm_lead_{lead}'] - df['usgs_observed']
+    def split_data(self, df):
+        """
+        Split data into training+validation and testing sets based on time.
         
-        return df
-    
-    def handle_missing_values(self, df):
-        """Handle missing values in the dataset"""
-        # For simplicity, we'll use forward fill followed by backward fill
-        df = df.fillna(method='ffill')
-        df = df.fillna(method='bfill')
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            DataFrame with aligned data
+            
+        Returns:
+        --------
+        train_val_df : pandas.DataFrame
+            DataFrame for training and validation (Apr 2021 - Sep 2022)
+        test_df : pandas.DataFrame
+            DataFrame for testing (Oct 2022 - Apr 2023)
+        """
+        # Define split dates
+        train_val_start = pd.Timestamp('2021-04-01')
+        train_val_end = pd.Timestamp('2022-09-30')
+        test_start = pd.Timestamp('2022-10-01')
+        test_end = pd.Timestamp('2023-04-30')
         
-        # Drop any remaining rows with NaN values
-        df = df.dropna()
+        # Create masks for the splits
+        train_val_mask = (df.index >= train_val_start) & (df.index <= train_val_end)
+        test_mask = (df.index >= test_start) & (df.index <= test_end)
         
-        return df
+        # Split the data
+        train_val_df = df[train_val_mask].copy()
+        test_df = df[test_mask].copy()
+        
+        return train_val_df, test_df
     
     def create_sequences(self, df):
         """
-        Create sequences for the Seq2Seq model:
-        - Encoder input: past observations, forecasts, and errors
-        - Decoder input: current NWM forecasts for lead times 1-18
-        - Target output: actual errors for lead times 1-18
-        """
-        X_encoder = []
-        X_decoder = []
-        y = []
+        Create encoder input sequences, decoder input sequences, and target output sequences.
         
-        # Convert dataframe to numpy for easier sequence creation
-        data_array = df.values
+        Parameters:
+        -----------
+        df : pandas.DataFrame
+            DataFrame with aligned data
+            
+        Returns:
+        --------
+        sequences : dict
+            Dictionary containing:
+            - X_encoder: Encoder input sequences (past observations and forecasts)
+            - X_decoder: Decoder input sequences (current forecasts)
+            - y: Target output sequences (forecast errors)
+            - df: Original DataFrame
+        """
+        # Ensure data is sorted by time
+        df = df.sort_index()
+        
+        # Lists to store sequences
+        encoder_inputs = []
+        decoder_inputs = []
+        targets = []
         
         # Create sequences
-        for i in range(self.sequence_length, len(df) - 18):  # Need at least 18 hours ahead for targets
-            # Encoder input: last sequence_length hours of [usgs_observed, nwm_lead_1, error_lead_1]
-            enc_input = []
-            for j in range(i-self.sequence_length, i):
-                # Get USGS observation, NWM 1h lead forecast, and 1h forecast error
-                enc_input.append([
-                    df.iloc[j]['usgs_observed'],
-                    df.iloc[j]['nwm_lead_1'],
-                    df.iloc[j]['error_lead_1']
-                ])
+        for i in range(len(df) - self.sequence_length):
+            # Encoder input: sequence_length hours of history
+            encoder_input = []
             
-            # Decoder input: current NWM forecasts for lead times 1-18
-            dec_input = []
+            # For each timestep in the encoder sequence
+            for j in range(self.sequence_length):
+                # Get timestamp for this step
+                idx = i + j
+                
+                # Features for each timestep: USGS observed, NWM 1h forecast, 1h error
+                features = [
+                    df.iloc[idx]['usgs_observed'],
+                    df.iloc[idx]['nwm_lead_1'],
+                    df.iloc[idx]['error_lead_1'],
+                ]
+                
+                encoder_input.append(features)
+            
+            # Decoder input: Current NWM forecasts for lead times 1-18
+            decoder_input = []
             for lead in range(1, 19):
-                dec_input.append(df.iloc[i][f'nwm_lead_{lead}'])
+                col_name = f'nwm_lead_{lead}'
+                if col_name in df.columns:
+                    decoder_input.append(df.iloc[i + self.sequence_length][col_name])
             
-            # Target: actual errors for lead times 1-18 over the next 18 hours
+            # Target: Actual forecast errors for lead times 1-18
             target = []
             for lead in range(1, 19):
-                # For lead time L, get the error at time t+L
-                target.append(df.iloc[i+lead-1][f'error_lead_{lead}'])
+                error_col = f'error_lead_{lead}'
+                if error_col in df.columns:
+                    target.append(df.iloc[i + self.sequence_length][error_col])
             
-            X_encoder.append(np.array(enc_input))
-            X_decoder.append(np.array(dec_input))
-            y.append(np.array(target))
+            # Add sequences to lists
+            if len(decoder_input) == 18 and len(target) == 18:
+                encoder_inputs.append(encoder_input)
+                decoder_inputs.append(decoder_input)
+                targets.append(target)
         
-        return np.array(X_encoder), np.array(X_decoder), np.array(y)
+        # Convert to numpy arrays
+        X_encoder = np.array(encoder_inputs)
+        X_decoder = np.array(decoder_inputs)
+        y = np.array(targets)
+        
+        return {
+            'X_encoder': X_encoder,
+            'X_decoder': X_decoder,
+            'y': y,
+            'df': df
+        }
     
-    def scale_features(self, X_encoder_train, X_decoder_train, y_train, X_encoder_val=None, X_decoder_val=None):
-        """Scale features using StandardScaler fit only on training data"""
+    def scale_data(self, train_data, test_data=None):
+        """
+        Scale the data using StandardScaler.
         
-        # Reshape data for scaling
-        encoder_shape = X_encoder_train.shape
-        X_encoder_flat = X_encoder_train.reshape(-1, X_encoder_train.shape[-1])
-        
-        decoder_shape = X_decoder_train.shape
-        X_decoder_flat = X_decoder_train.reshape(-1, 1)
-        
-        y_shape = y_train.shape
-        y_flat = y_train.reshape(-1, 1)
-        
-        # Fit scalers on training data
+        Parameters:
+        -----------
+        train_data : dict
+            Dictionary with training data sequences
+        test_data : dict, optional
+            Dictionary with test data sequences
+            
+        Returns:
+        --------
+        scaled_train_data : dict
+            Dictionary with scaled training data
+        scaled_test_data : dict, optional
+            Dictionary with scaled test data
+        scalers : dict
+            Dictionary with fitted scalers
+        """
+        # Create scalers
         encoder_scaler = StandardScaler()
         decoder_scaler = StandardScaler()
         target_scaler = StandardScaler()
         
-        X_encoder_flat_scaled = encoder_scaler.fit_transform(X_encoder_flat)
-        X_decoder_flat_scaled = decoder_scaler.fit_transform(X_decoder_flat)
-        y_flat_scaled = target_scaler.fit_transform(y_flat)
+        # Reshape data for scaling
+        X_encoder_shape = train_data['X_encoder'].shape
+        X_decoder_shape = train_data['X_decoder'].shape
+        y_shape = train_data['y'].shape
         
-        # Reshape back to original structure
-        X_encoder_train_scaled = X_encoder_flat_scaled.reshape(encoder_shape)
-        X_decoder_train_scaled = X_decoder_flat_scaled.reshape(decoder_shape)
-        y_train_scaled = y_flat_scaled.reshape(y_shape)
+        # Fit and transform training data
+        X_encoder_scaled = encoder_scaler.fit_transform(
+            train_data['X_encoder'].reshape(-1, X_encoder_shape[-1])
+        ).reshape(X_encoder_shape)
         
-        # Save scalers for later use
-        self.encoder_scaler = encoder_scaler
-        self.decoder_scaler = decoder_scaler
-        self.target_scaler = target_scaler
+        X_decoder_scaled = decoder_scaler.fit_transform(
+            train_data['X_decoder'].reshape(-1, 1)
+        ).reshape(X_decoder_shape)
         
-        # If validation data is provided, scale it too
-        if X_encoder_val is not None and X_decoder_val is not None:
-            encoder_val_shape = X_encoder_val.shape
-            X_encoder_val_flat = X_encoder_val.reshape(-1, X_encoder_val.shape[-1])
-            X_encoder_val_scaled = encoder_scaler.transform(X_encoder_val_flat)
-            X_encoder_val_scaled = X_encoder_val_scaled.reshape(encoder_val_shape)
+        y_scaled = target_scaler.fit_transform(
+            train_data['y'].reshape(-1, 1)
+        ).reshape(y_shape)
+        
+        # Create scaled training data dictionary
+        scaled_train_data = {
+            'X_encoder': X_encoder_scaled,
+            'X_decoder': X_decoder_scaled,
+            'y': y_scaled,
+            'df': train_data['df']
+        }
+        
+        # Scale test data if provided
+        scaled_test_data = None
+        if test_data is not None:
+            X_encoder_test_shape = test_data['X_encoder'].shape
+            X_decoder_test_shape = test_data['X_decoder'].shape
+            y_test_shape = test_data['y'].shape
             
-            decoder_val_shape = X_decoder_val.shape
-            X_decoder_val_flat = X_decoder_val.reshape(-1, 1)
-            X_decoder_val_scaled = decoder_scaler.transform(X_decoder_val_flat)
-            X_decoder_val_scaled = X_decoder_val_scaled.reshape(decoder_val_shape)
+            X_encoder_test_scaled = encoder_scaler.transform(
+                test_data['X_encoder'].reshape(-1, X_encoder_test_shape[-1])
+            ).reshape(X_encoder_test_shape)
             
-            return X_encoder_train_scaled, X_decoder_train_scaled, y_train_scaled, X_encoder_val_scaled, X_decoder_val_scaled
+            X_decoder_test_scaled = decoder_scaler.transform(
+                test_data['X_decoder'].reshape(-1, 1)
+            ).reshape(X_decoder_test_shape)
+            
+            y_test_scaled = target_scaler.transform(
+                test_data['y'].reshape(-1, 1)
+            ).reshape(y_test_shape)
+            
+            scaled_test_data = {
+                'X_encoder': X_encoder_test_scaled,
+                'X_decoder': X_decoder_test_scaled,
+                'y': y_test_scaled,
+                'df': test_data['df']
+            }
         
-        return X_encoder_train_scaled, X_decoder_train_scaled, y_train_scaled
+        # Store scalers
+        scalers = {
+            'encoder': encoder_scaler,
+            'decoder': decoder_scaler,
+            'target': target_scaler
+        }
+        
+        return scaled_train_data, scaled_test_data, scalers
     
-    def split_train_test(self, df):
+    def process_data(self, stream_ids):
         """
-        Split data into training+validation and test sets based on date ranges:
-        - Training/Validation: April 2021 – September 2022
-        - Testing: October 2022 – April 2023
-        """
-        test_start_date = pd.Timestamp('2022-10-01')
-        
-        train_val_df = df[df.index < test_start_date].copy()
-        test_df = df[df.index >= test_start_date].copy()
-        
-        return train_val_df, test_df
-    
-    def process_data(self, stream_ids=None):
-        """
-        Main method to process the data for all streams.
+        Process all data for one or more streams.
         
         Parameters:
         -----------
-        stream_ids : list, optional
-            List of stream IDs to process. If None, processes all streams in raw_data_path.
+        stream_ids : list
+            List of stream identifiers
             
         Returns:
         --------
-        dict : Dictionary containing preprocessed data for training, validation, and testing
+        processed_data : dict
+            Dictionary with processed data for each stream
         """
-        if stream_ids is None:
-            stream_ids = [d for d in os.listdir(self.raw_data_path) 
-                         if os.path.isdir(os.path.join(self.raw_data_path, d))]
-        
-        all_data = {}
+        processed_data = {}
         
         for stream_id in stream_ids:
-            print(f"Processing stream: {stream_id}")
+            print(f"Processing stream {stream_id}...")
             
             # Load data
+            print("  Loading data...")
             usgs_df = self.load_usgs_data(stream_id)
             nwm_df = self.load_nwm_data(stream_id)
             
-            # Align and preprocess
-            aligned_df = self.align_data(usgs_df, nwm_df)
-            aligned_df = self.calculate_errors(aligned_df)
-            aligned_df = self.handle_missing_values(aligned_df)
+            # Clean and align data
+            print("  Cleaning and aligning data...")
+            aligned_df = self.clean_and_align_data(usgs_df, nwm_df)
             
-            # Split into train/val and test
-            train_val_df, test_df = self.split_train_test(aligned_df)
+            # Split data
+            print("  Splitting data...")
+            train_val_df, test_df = self.split_data(aligned_df)
             
-            # Create sequences for each set
-            X_enc_train_val, X_dec_train_val, y_train_val = self.create_sequences(train_val_df)
-            X_enc_test, X_dec_test, y_test = self.create_sequences(test_df)
+            # Save processed DataFrames
+            train_val_path = os.path.join(self.processed_data_path, f"{stream_id}_train_val_data.csv")
+            test_path = os.path.join(self.processed_data_path, f"{stream_id}_test_data.csv")
+            train_val_df.to_csv(train_val_path)
+            test_df.to_csv(test_path)
             
-            # Scale features
-            X_enc_train_val_scaled, X_dec_train_val_scaled, y_train_val_scaled = self.scale_features(
-                X_enc_train_val, X_dec_train_val, y_train_val
-            )
+            # Create sequences
+            print("  Creating sequences...")
+            train_val_sequences = self.create_sequences(train_val_df)
+            test_sequences = self.create_sequences(test_df)
             
-            # Scale test data with the same scalers fit on training data
-            X_enc_test_scaled = self.encoder_scaler.transform(X_enc_test.reshape(-1, X_enc_test.shape[-1]))
-            X_enc_test_scaled = X_enc_test_scaled.reshape(X_enc_test.shape)
-            
-            X_dec_test_scaled = self.decoder_scaler.transform(X_dec_test.reshape(-1, 1))
-            X_dec_test_scaled = X_dec_test_scaled.reshape(X_dec_test.shape)
+            # Scale data
+            print("  Scaling data...")
+            scaled_train_val, scaled_test, scalers = self.scale_data(train_val_sequences, test_sequences)
             
             # Store processed data
-            all_data[stream_id] = {
-                'train_val': {
-                    'X_encoder': X_enc_train_val_scaled,
-                    'X_decoder': X_dec_train_val_scaled,
-                    'y': y_train_val_scaled,
-                    'df': train_val_df
-                },
-                'test': {
-                    'X_encoder': X_enc_test_scaled,
-                    'X_decoder': X_dec_test_scaled,
-                    'y': y_test,  # Unscaled for evaluation
-                    'df': test_df
-                },
-                'scalers': {
-                    'encoder': self.encoder_scaler,
-                    'decoder': self.decoder_scaler,
-                    'target': self.target_scaler
-                }
+            processed_data[stream_id] = {
+                'train_val': scaled_train_val,
+                'test': scaled_test,
+                'scalers': scalers
             }
             
-            # Save to disk
-            np.save(os.path.join(self.processed_data_path, f'{stream_id}_train_val.npy'), {
-                'X_encoder': X_enc_train_val_scaled,
-                'X_decoder': X_dec_train_val_scaled,
-                'y': y_train_val_scaled
-            })
-            
-            np.save(os.path.join(self.processed_data_path, f'{stream_id}_test.npy'), {
-                'X_encoder': X_enc_test_scaled,
-                'X_decoder': X_dec_test_scaled,
-                'y': y_test
-            })
-            
-            # Save processed dataframes for reference
-            train_val_df.to_csv(os.path.join(self.processed_data_path, 'train_validation_data.csv'))
-            test_df.to_csv(os.path.join(self.processed_data_path, 'test_data.csv'))
+            print(f"  Done processing stream {stream_id}.")
         
-        return all_data
+        return processed_data
+
 
 if __name__ == "__main__":
     # Example usage
-    preprocessor = DataPreprocessor(
-        raw_data_path="../data/raw",
-        processed_data_path="../data/processed",
-        sequence_length=24
-    )
+    raw_data_path = "../data/raw"
+    processed_data_path = "../data/processed"
     
-    data = preprocessor.process_data(stream_ids=["20380357", "21609641"])
-    print("Data preprocessing completed successfully.")
+    # Create processor
+    processor = DataPreprocessor(raw_data_path, processed_data_path)
+    
+    # Process data for all streams
+    stream_ids = ["20380357", "21609641"]
+    processed_data = processor.process_data(stream_ids)
+    
+    # Print data shapes
+    for stream_id in stream_ids:
+        print(f"\nStream {stream_id} data shapes:")
+        print(f"  Training/Validation:")
+        print(f"    X_encoder: {processed_data[stream_id]['train_val']['X_encoder'].shape}")
+        print(f"    X_decoder: {processed_data[stream_id]['train_val']['X_decoder'].shape}")
+        print(f"    y: {processed_data[stream_id]['train_val']['y'].shape}")
+        print(f"  Test:")
+        print(f"    X_encoder: {processed_data[stream_id]['test']['X_encoder'].shape}")
+        print(f"    X_decoder: {processed_data[stream_id]['test']['X_decoder'].shape}")
+        print(f"    y: {processed_data[stream_id]['test']['y'].shape}")
