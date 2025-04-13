@@ -11,17 +11,18 @@ nwm_dl_postprocessing/
 │       └── test_data.csv               # Strictly held-out test data (October 2022–April 2023)
 │
 ├── models/
-│   └── nwm_lstm_model.keras            # Trained LSTM model with optimized hyperparameters
+│   └── nwm_lstm_model.keras            # Trained Seq2Seq LSTM model with optimized hyperparameters
 │
 ├── notebooks/
 │   ├── exploratory_analysis.ipynb      # Exploratory data analysis of NWM and USGS time series
-│   ├── model_development.ipynb         # Prototyping LSTM model with hyperparameter tuning
+│   ├── model_development.ipynb         # Prototyping Seq2Seq LSTM model with hyperparameter tuning
 │   └── results_visualization.ipynb     # Generating plots and analyzing model evaluation metrics
 │
 ├── src/
-│   ├── preprocess.py                   # Data loading, cleaning, time alignment, and splitting
-│   ├── model.py                        # LSTM model architecture with ReLU activation and Adam optimizer
-│   ├── tuner.py                        # KerasTuner (HyperBand/Bayesian) for hyperparameter optimization
+│   ├── preprocess.py                   # Data loading, cleaning, feature engineering, and splitting
+│   ├── model.py                        # Seq2Seq LSTM model architecture with ReLU activation and Adam optimizer
+│   ├── tuner.py                        # KerasTuner with TimeSeriesSplit for hyperparameter optimization
+│   ├── baseline.py                     # Simple persistence-based baseline model for error correction
 │   ├── predict.py                      # Generates runoff predictions from trained model
 │   ├── evaluate.py                     # Calculates CC, RMSE, PBIAS, NSE metrics
 │   └── visualize.py                    # Creates box plots using Seaborn and Matplotlib
@@ -32,7 +33,7 @@ nwm_dl_postprocessing/
 │
 ├── reports/
 │   ├── figures/
-│   │   ├── runoff_boxplots.png         # Box plots: Observed vs NWM vs Corrected runoff
+│   │   ├── runoff_boxplots.png         # Box plots: Observed vs NWM vs Corrected (LSTM) vs Corrected (Baseline) runoff
 │   │   └── metrics_boxplots.png        # Box plots of evaluation metrics across lead times
 │   └── technical_report.pdf            # Final report formatted for IEEE or hydrology publication
 │
@@ -68,12 +69,17 @@ jupyter
 - Strict adherence to time-based train/validation (April 2021–September 2022) and test (October 2022–April 2023) splits.
 
 ### ✅ Model Architecture
-- Uses an LSTM neural network with ReLU activation functions and the Adam optimizer.
-- Designed specifically to correct residuals between NWM forecasts and USGS observed runoff.
+- Uses a Sequence-to-Sequence LSTM neural network with ReLU activation functions and the Adam optimizer.
+- Designed specifically to correct residuals between NWM forecasts and USGS observed runoff across all lead times simultaneously.
 
 ### ✅ Automated Hyperparameter Tuning
 - Integrated `keras_tuner` via `tuner.py` to perform scalable searches using HyperBand or Bayesian optimization.
-- Tunes number of LSTM units, learning rate, dropout, and number of layers.
+- Uses TimeSeriesSplit for robust time-series validation within the training period.
+- Tunes number of LSTM units, learning rate, dropout, sequence length, and number of layers.
+
+### ✅ Baseline Comparison
+- Implements a simple persistence-based baseline model for error correction.
+- Provides context for evaluating the added complexity versus performance gain of the Seq2Seq approach.
 
 ### ✅ Comprehensive Evaluation
 - Hydrologic metrics computed across 1–18 hour lead times:
@@ -97,61 +103,71 @@ jupyter
 Accurate runoff forecasting is vital for flood prediction, water resource management, and hydrologic analyses. The United States National Water Model (NWM), developed by NOAA, provides short-range runoff forecasts across the continental US. However, these forecasts can exhibit systematic and time-dependent errors, especially at longer lead times. Recent advances in Deep Learning (DL) offer potential to enhance physically based hydrologic models by post-processing forecasts. Sequence models like Long Short-Term Memory (LSTM) networks can learn to predict NWM forecast errors, producing corrected runoff forecasts that align better with observed data. This project draws inspiration from Han & Morrison (2022), which combines NWM outputs with observed runoff and precipitation in a DL framework.
 
 ## Project Goal
-The objective is to apply a Deep Learning technique (e.g., LSTM, GRU, Transformers, or other neural network architectures) to improve NWM short-range runoff forecasting. The tasks include:
-1. **Preprocessing**: Prepare NWM forecasts and USGS observed runoff data for two US stations.
-2. **Model Development**: Train, validate, and test a DL model to correct NWM forecasts for lead times of 1–18 hours.
-3. **Evaluation**: Assess corrected forecasts using standard hydrologic metrics.
+The objective is to apply a Sequence-to-Sequence LSTM model to improve NWM short-range runoff forecasting by predicting forecast errors. The tasks include:
+1.  **Preprocessing**: Prepare NWM forecasts and USGS observed runoff data for two US stations. Define input sequences using past observations and forecasts.
+2.  **Model Development**: Train, validate, and test a single Seq2Seq DL model to predict NWM forecast errors for lead times of 1–18 hours simultaneously. Use robust time-series cross-validation during hyperparameter tuning.
+3.  **Evaluation**: Assess corrected forecasts using standard hydrologic metrics and compare against original NWM forecasts and a simple baseline correction model.
 
 ## Data Description and Usage Rules
 ### Data Sources
-- **NWM Forecasts**: Hourly short-range forecasts (1–18 h lead times) for two US stations, spanning April 2021 to April 2023.
-- **USGS Observations**: Hourly observed runoff data for the same period.
-- **Optional Inputs**: Precipitation or other meteorological data (e.g., NOAA datasets) if needed for the DL model.
+-   **NWM Forecasts**: Hourly short-range forecasts (1–18 h lead times) for two US stations, spanning April 2021 to April 2023. Contained in monthly files (`streamflow_*.csv`).
+-   **USGS Observations**: Hourly observed runoff data for the same period. Contained in `*_Strt_*.csv` files.
+-   **Derived Data**: NWM forecast errors (residuals) calculated as `NWM_forecast - USGS_observation` for each lead time.
 
 ### Train/Validation/Test Split
-- **Training/Validation**: April 2021 – September 2022
-- **Testing**: October 2022 – April 2023
+-   **Training/Validation**: April 2021 – September 2022 (Used for model training and hyperparameter tuning with TimeSeriesSplit).
+-   **Testing**: October 2022 – April 2023 (Strictly held-out set for final evaluation).
 
 **Note**: Test set data (October 2022 – April 2023) must not be used during training or validation to prevent data leakage.
 
 ## Tasks
 ### 4.1 Data Preprocessing
-- Clean data (e.g., handle missing values, align time steps, convert units).
-- Split data into training, validation, and testing sets per the specified time frames.
+-   Clean data (e.g., handle missing values, align time steps, convert units).
+-   Calculate NWM forecast errors (residuals) for each lead time.
+-   **Feature Engineering**: Construct sequences for the Seq2Seq model.
+    -   **Encoder Input Sequence**: Use a fixed window (e.g., the past 24 hours) of:
+        -   USGS observed runoff.
+        -   NWM 1-hour lead forecasts.
+        -   Calculated 1-hour lead forecast errors (NWM 1h forecast - USGS observation).
+    -   **Decoder Input Sequence**: NWM forecasts for lead times 1-18 hours issued at the *current* time step (these are the forecasts needing correction).
+    -   **Target Output Sequence**: The *actual* NWM forecast errors for lead times 1-18 hours over the *next* 18 hours.
+-   Scale features appropriately (e.g., using `StandardScaler` fit only on the training data).
+-   Split data into training+validation and testing sets per the specified time frames.
 
 ### 4.2 Model Development
-- Choose a DL architecture (e.g., LSTM, GRU, CNN-LSTM, Transformers, or feed-forward networks with temporal features).
-- Train the model to predict NWM forecast errors (residuals) or directly estimate corrected runoff.
-- Ensure no future or test data is used during training or validation.
+-   **Architecture**: Implement a Sequence-to-Sequence (Seq2Seq) model using LSTM layers for both the encoder and decoder.
+-   **Target**: Train the single model to predict the sequence of NWM forecast errors for lead times 1–18 hours simultaneously.
+-   **Hyperparameter Tuning**: Use `keras_tuner` (e.g., HyperBand or BayesianOptimization) to optimize parameters like LSTM units, learning rate, dropout, etc.
+    -   **Validation Strategy**: Employ `sklearn.model_selection.TimeSeriesSplit` within the KerasTuner search process on the training+validation dataset (April 2021 – September 2022) to ensure robust hyperparameter selection suitable for time-series data.
+-   Ensure no future or test data is used during training or tuning.
 
 ### 4.3 Model Testing and Analysis
-- Evaluate the model on the test set (October 2022 – April 2023).
-- Generate corrected forecasts for each lead time (1–18 h).
-- Compare corrected forecasts against:
-  - Original NWM forecasts
-  - Observed USGS runoff
+-   Evaluate the final tuned model on the held-out test set (October 2022 – April 2023).
+-   Generate predicted error sequences for each time step in the test set.
+-   Calculate corrected forecasts: `Corrected_Forecast[lead] = NWM_Forecast[lead] - Predicted_Error[lead]`.
+-   **Baseline Comparison**: Implement and evaluate a simple baseline error correction model (e.g., persistence: predict error for lead `L` at time `t+L` as the observed error for lead `L` at time `t`).
+-   Compare corrected forecasts against:
+    -   Original NWM forecasts
+    -   Observed USGS runoff
+    -   Baseline corrected forecasts
 
 ## Required Results and Plots
-1. **Box-plot of Runoff**:
-   - Compare Observed (USGS), Forecasted (NWM), and Corrected (model) runoff for each lead time (1–18 h).
-   - Display three box-plots per lead time, similar to Figure 4 in Han & Morrison (2022).
+1.  **Box-plot of Runoff**:
+    -   Compare Observed (USGS), Forecasted (NWM), Corrected (Seq2Seq model), and Corrected (Baseline) runoff for each lead time (1–18 h).
+    -   Display four box-plots per lead time.
 
-2. **Box-plots of Evaluation Metrics**:
-   - Compute and plot for each lead time (1–18 h):
-     - Coefficient of Correlation (CC)
-     - Root Mean Square Error (RMSE)
-     - Percent Bias (PBIAS)
-     - Nash-Sutcliffe Efficiency (NSE)
-   - Present metrics as four box-plots (one per metric), each with 18 boxes (one per lead time).
-   - Compare NWM and corrected forecasts.
+2.  **Box-plots of Evaluation Metrics**:
+    -   Compute and plot for each lead time (1–18 h): CC, RMSE, PBIAS, NSE.
+    -   Present metrics as four box-plots (one per metric), each with 18 sets of boxes (one set per lead time).
+    -   Compare metrics for the original NWM forecasts, the Seq2Seq corrected forecasts, and the Baseline corrected forecasts.
 
 ## Deliverables
 ### (a) Technical Report
 - Format: Scientific paper style (e.g., IEEE or hydrology journal).
 - Content:
-  - **Methodology**: Data sources, preprocessing, DL model, and training details.
+  - **Methodology**: Data sources, preprocessing, Seq2Seq model architecture, and training details.
   - **Results**: Required plots, tables, error metrics, and discussion.
-  - **Implications**: Compare model performance to NWM forecasts, discuss challenges and limitations.
+  - **Implications**: Compare model performance to NWM forecasts and baseline correction, discuss challenges and limitations.
 - Include a link to a private GitHub repository with well-documented code (e.g., README.md with instructions to reproduce results).
 
 ### (b) Class Presentation
@@ -165,7 +181,7 @@ The objective is to apply a Deep Learning technique (e.g., LSTM, GRU, Transforme
 ## Important Notes
 - **Data Leakage**: Strictly avoid using test set data (October 2022 – April 2023) for training or tuning.
 - **Collaboration**: All group members must contribute significantly to technical work and deliverables.
-- **Flexibility**: Explore any DL architecture, justifying design choices.
+- **Flexibility**: While the Seq2Seq LSTM architecture is specified, variations in implementation are encouraged with proper justification.
 - **Tools**: Use open-source frameworks (e.g., TensorFlow, PyTorch, Keras).
 - **Citations**: Reference all external packages, papers, or resources used.
 
