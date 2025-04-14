@@ -1,52 +1,61 @@
-# Data files
-/data/folder1/**
-/data/folder2/**
-/data/raw/*.csv
-/data/raw/*.nc
-/data/processed/*.csv
-/data/processed/train_validation_data.csv
-/data/processed/test_data.csv
-/data/processed/predictions.csv
-*.csv
+# Python virtual environment
+nwm_env/
+env/
+venv/
+ENV/
+.env
 
-# Model files
-/models/*.keras
-/models/*.h5
-/models/nwm_dl_model.keras
-
-# Python artifacts
+# Python cache files
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-env/
-build/
-develop-eggs/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Distribution / packaging
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
+build/
 *.egg-info/
 .installed.cfg
 *.egg
 
-# Virtual environments
-venv/
-ENV/
-runoff_env_py310/
+# Jupyter Notebook checkpoints and metadata
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+.jupyter/
 
-# Other
+# Model checkpoints and large data files
+*.h5
+*.keras
+*.pkl
+*.joblib
+*.model
+*.tfevents.*
+/nwm_dl_postprocessing/data/processed/*.csv
+/nwm_dl_postprocessing/models/*
+!/nwm_dl_postprocessing/models/.gitkeep
+
+# Logs and temporary files
+logs/
+*.log
+tmp/
+temp/
 .DS_Store
 .idea/
 .vscode/
-results/predictions.csv
-results/*.csv
-data/
-*.h5
-runoff_env*/
+*.swp
+*.swo
+
+# TensorFlow and Keras Tuner specific files
+.keras_tuner/
+logs/
+tb_logs/
+
+# OS specific files
+.DS_Store
+._*
+Thumbs.db
+.Spotlight-V100
+.Trashes
