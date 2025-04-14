@@ -254,6 +254,6 @@ if __name__ == "__main__":
         X_encoder_train, X_decoder_train, y_train,
         n_splits=2,
         batch_size=32,
-        epochs=5,  # Reduced for testing
+        epochs=50, 
         verbose=1
     )
