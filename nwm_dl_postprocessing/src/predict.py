@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import os
 import tensorflow as tf
-from model import Seq2SeqLSTMModel
+from nwm_dl_postprocessing.src.model import Seq2SeqLSTMModel
 
 class ForecastPredictor:
     """
@@ -196,20 +196,33 @@ class ForecastPredictor:
 
 if __name__ == "__main__":
     # Example usage
-    from preprocess import DataPreprocessor
+    from nwm_dl_postprocessing.src.preprocess import DataPreprocessor
     import matplotlib.pyplot as plt
+    import os
+    
+    # Define base paths as absolute paths
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_raw_path = os.path.join(base_dir, "data", "raw")
+    data_processed_path = os.path.join(base_dir, "data", "processed")
+    models_path = os.path.join(base_dir, "models")
+    reports_path = os.path.join(base_dir, "reports", "figures")
+    
+    # Ensure directories exist
+    os.makedirs(data_processed_path, exist_ok=True)
+    os.makedirs(reports_path, exist_ok=True)
     
     # Load preprocessed data
     preprocessor = DataPreprocessor(
-        raw_data_path="../data/raw",
-        processed_data_path="../data/processed",
+        raw_data_path=data_raw_path,
+        processed_data_path=data_processed_path,
         sequence_length=24
     )
     
     data = preprocessor.process_data(stream_ids=["20380357"])
     
     # Create predictor and load model
-    predictor = ForecastPredictor("../models/nwm_lstm_model.keras")
+    model_path = os.path.join(models_path, "test_model.keras")
+    predictor = ForecastPredictor(model_path)
     predictor.set_scaler(data["20380357"]["scalers"]["target"])
     
     # Generate corrected forecasts
@@ -217,18 +230,20 @@ if __name__ == "__main__":
     corrected_df = predictor.generate_corrected_forecasts(test_data)
     
     # Save results
-    corrected_df.to_csv("../data/processed/lstm_corrected_forecasts.csv")
+    output_file = os.path.join(data_processed_path, "lstm_corrected_forecasts.csv")
+    corrected_df.to_csv(output_file)
+    print(f"Corrected forecasts saved to {output_file}")
     
     # Example plot for a single lead time
     lead = 6  # 6-hour lead time
     plt.figure(figsize=(12, 6))
     plt.plot(corrected_df.index, corrected_df['usgs_observed'], label='Observed (USGS)')
     plt.plot(corrected_df.index, corrected_df[f'nwm_lead_{lead}'], label=f'NWM Forecast ({lead}h)')
-    plt.plot(corrected_df.index, corrected_df[f'lstm_corrected_lead_{lead}'], 
-             label=f'LSTM Corrected ({lead}h)')
-    plt.title(f'Comparison of Original vs LSTM-Corrected Forecasts ({lead}-hour Lead Time)')
-    plt.xlabel('Time')
-    plt.ylabel('Runoff')
+    plt.plot(corrected_df.index, corrected_df[f'lstm_corrected_lead_{lead}'], label=f'LSTM Corrected ({lead}h)')
     plt.legend()
-    plt.savefig(f"../reports/figures/lstm_comparison_{lead}h.png")
-    plt.close()
+    plt.title(f'NWM vs LSTM-Corrected Forecast (Lead Time: {lead}h)')
+    plt.xlabel('Date')
+    plt.ylabel('Streamflow')
+    plt.tight_layout()
+    plt.savefig(os.path.join(reports_path, f'forecast_lead{lead}.png'))
+    print(f"Example plot saved to {os.path.join(reports_path, f'forecast_lead{lead}.png')}")

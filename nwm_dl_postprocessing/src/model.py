@@ -234,12 +234,24 @@ class Seq2SeqLSTMModel:
 
 if __name__ == "__main__":
     # Example usage
-    from preprocess import DataPreprocessor
+    # Fix the import statement to use the correct module path
+    from nwm_dl_postprocessing.src.preprocess import DataPreprocessor
+    import os
+    
+    # Define base paths relative to the project root
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_raw_path = os.path.join(base_dir, "data", "raw")
+    data_processed_path = os.path.join(base_dir, "data", "processed")
+    models_path = os.path.join(base_dir, "models")
+    
+    # Ensure directories exist
+    os.makedirs(data_processed_path, exist_ok=True)
+    os.makedirs(models_path, exist_ok=True)
     
     # Load preprocessed data
     preprocessor = DataPreprocessor(
-        raw_data_path="../data/raw",
-        processed_data_path="../data/processed",
+        raw_data_path=data_raw_path,
+        processed_data_path=data_processed_path,
         sequence_length=24
     )
     
@@ -271,5 +283,6 @@ if __name__ == "__main__":
         verbose=1
     )
     
-    # Save model
-    model.save("../models/test_model.keras")
+    # Save model with absolute path
+    model_path = os.path.join(models_path, "test_model.keras")
+    model.save(model_path)

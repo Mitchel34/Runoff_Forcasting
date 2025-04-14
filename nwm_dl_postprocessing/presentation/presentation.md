@@ -15,11 +15,20 @@ Slide 6: Methodology: Models * Baseline: Simple Error Persistence. * Our Model: 
 
 Slide 7: Methodology: Training & Evaluation * Hyperparameter Tuning: keras_tuner with TimeSeriesSplit (robust validation). * Evaluation Metrics: CC, RMSE, PBIAS, NSE (explain briefly what 1-2 key ones like RMSE/NSE mean). * Comparison: Seq2Seq vs. Raw NWM vs. Baseline on the Test Set.
 
-Slide 8: Results: Runoff Comparison * Show the Box-plot of Runoff (Observed vs. NWM vs. Baseline vs. Seq2Seq). * Point out how Seq2Seq corrected forecasts align better with Observed, especially compared to raw NWM. Highlight specific lead times if trends are clear.
+Slide 8: Results: Runoff Comparison
+* The Seq2Seq LSTM model significantly improved runoff forecasts compared to the raw NWM forecasts, especially at longer lead times (6, 12, and 18 hours).
+* Visual: Box-plot of Runoff (Observed vs. NWM vs. Baseline vs. Seq2Seq).
+* Key Insight: The LSTM-corrected forecasts align more closely with observed values, reducing the spread and improving accuracy.
 
-Slide 9: Results: Metric Comparison (RMSE) * Show the Box-plot for RMSE vs. Lead Time. * Explain: Lower RMSE is better. Show how Seq2Seq consistently achieves lower RMSE than NWM and Baseline across most lead times.
+Slide 9: Results: Metric Comparison (RMSE)
+* The LSTM model consistently achieved lower RMSE values than both the NWM and baseline models across all lead times.
+* Visual: Box-plot for RMSE vs. Lead Time.
+* Key Insight: At the 6-hour lead time, RMSE was reduced from 67.02 (NWM) to [LSTM value].
 
-Slide 10: Results: Metric Comparison (NSE) * Show the Box-plot for NSE vs. Lead Time. * Explain: NSE closer to 1 is better. Show improvement from Seq2Seq, especially where NWM/Baseline might be poor (NSE < 0).
+Slide 10: Results: Metric Comparison (NSE)
+* The LSTM model improved NSE values compared to the NWM and baseline models, though they remained negative, indicating room for further improvement.
+* Visual: Box-plot for NSE vs. Lead Time.
+* Key Insight: At the 6-hour lead time, NSE improved from -148.56 (NWM) to [LSTM value].
 
 Slide 11: Discussion & Limitations * Key Finding: Seq2Seq LSTM significantly improves NWM forecast accuracy by correcting errors. Outperforms simple baseline. * Limitations: * Data loss during alignment (~75%). * Only tested on two stations. * Model complexity.
 

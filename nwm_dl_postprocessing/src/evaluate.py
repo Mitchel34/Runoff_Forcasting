@@ -219,18 +219,27 @@ class ForecastEvaluator:
 
 if __name__ == "__main__":
     # Example usage
-    from preprocess import DataPreprocessor
-    from predict import ForecastPredictor
-    from baseline import PersistenceBaseline
+    from nwm_dl_postprocessing.src.preprocess import DataPreprocessor
+    from nwm_dl_postprocessing.src.predict import ForecastPredictor
+    from nwm_dl_postprocessing.src.baseline import PersistenceBaseline
     import os
     
-    # Ensure figures directory exists
-    os.makedirs("../reports/figures", exist_ok=True)
+    # Define base paths as absolute paths
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_raw_path = os.path.join(base_dir, "data", "raw")
+    data_processed_path = os.path.join(base_dir, "data", "processed")
+    models_path = os.path.join(base_dir, "models")
+    reports_path = os.path.join(base_dir, "reports")
+    figures_path = os.path.join(reports_path, "figures")
+    
+    # Ensure directories exist
+    os.makedirs(data_processed_path, exist_ok=True)
+    os.makedirs(figures_path, exist_ok=True)
     
     # Load preprocessed data
     preprocessor = DataPreprocessor(
-        raw_data_path="../data/raw",
-        processed_data_path="../data/processed",
+        raw_data_path=data_raw_path,
+        processed_data_path=data_processed_path,
         sequence_length=24
     )
     
@@ -241,7 +250,8 @@ if __name__ == "__main__":
     test_df = test_data["df"]
     
     # Generate LSTM predictions
-    predictor = ForecastPredictor("../models/nwm_lstm_model.keras")
+    model_path = os.path.join(models_path, "test_model.keras")
+    predictor = ForecastPredictor(model_path)
     predictor.set_scaler(data["20380357"]["scalers"]["target"])
     lstm_corrected_df = predictor.generate_corrected_forecasts(test_data)
     
@@ -262,11 +272,15 @@ if __name__ == "__main__":
     evaluation_df = evaluator.evaluate_forecasts(results_df)
     
     # Save evaluation results
-    evaluation_df.to_csv("../reports/forecast_evaluation.csv")
+    evaluation_file = os.path.join(reports_path, "forecast_evaluation.csv")
+    evaluation_df.to_csv(evaluation_file)
+    print(f"Evaluation results saved to {evaluation_file}")
     
     # Print summary
     summary = evaluator.summarize_by_lead_time(evaluation_df)
     print(summary)
     
     # Save summary
-    summary.to_csv("../reports/evaluation_summary.csv")
+    summary_file = os.path.join(reports_path, "evaluation_summary.csv")
+    summary.to_csv(summary_file)
+    print(f"Evaluation summary saved to {summary_file}")

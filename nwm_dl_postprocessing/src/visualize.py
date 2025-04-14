@@ -10,7 +10,7 @@ class ForecastVisualizer:
     Generates box plots of runoff values and evaluation metrics across lead times.
     """
     
-    def __init__(self, figures_path="../reports/figures"):
+    def __init__(self, figures_path=None):
         """
         Initialize the ForecastVisualizer.
         
@@ -19,10 +19,15 @@ class ForecastVisualizer:
         figures_path : str
             Path to save generated figures
         """
-        self.figures_path = figures_path
+        # Use absolute path if provided, otherwise use default
+        if figures_path is None:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.figures_path = os.path.join(base_dir, "reports", "figures")
+        else:
+            self.figures_path = figures_path
         
         # Make sure figures directory exists
-        os.makedirs(figures_path, exist_ok=True)
+        os.makedirs(self.figures_path, exist_ok=True)
         
         # Set default style
         sns.set_style("whitegrid")
@@ -132,103 +137,45 @@ class ForecastVisualizer:
         metrics = ['CC', 'RMSE', 'PBIAS', 'NSE']
         figs = []
         
+        # Skip individual metric plots and create only the combined plot
         # Get forecast types from index
         forecast_types = evaluation_df.index.get_level_values('Forecast').unique()
-        
-        # Create a plot for each metric
-        for metric in metrics:
-            fig, ax = plt.subplots(figsize=(12, 8))
-            
-            # Prepare data for box plots by lead time
-            data_by_lead = []
-            lead_times = evaluation_df.index.get_level_values('Lead Time').unique()
-            
-            # Stack data for each forecast type per lead time
-            for lead in sorted(lead_times):
-                lead_data = []
-                for forecast in forecast_types:
-                    try:
-                        value = evaluation_df.loc[(forecast, lead), metric]
-                        lead_data.append(value)
-                    except:
-                        lead_data.append(np.nan)
-                data_by_lead.append(lead_data)
-            
-            # Positions for box groups
-            positions = np.arange(1, len(lead_times) + 1)
-            width = 0.25
-            
-            # Plot boxes for each forecast type
-            for i, forecast in enumerate(forecast_types):
-                # Extract values for this forecast type
-                forecast_values = [data[i] for data in data_by_lead]
-                
-                # Position offset for each group
-                pos = positions + (i - 1) * width
-                
-                # Create box plot
-                box = ax.boxplot(forecast_values, positions=pos, patch_artist=True, 
-                                 showfliers=False, widths=width*0.8)
-                
-                # Set box color
-                colors = ['lightblue', 'lightgreen', 'salmon']
-                for patch in box['boxes']:
-                    patch.set_facecolor(colors[i % len(colors)])
-            
-            # Set x-axis labels
-            ax.set_xticks(positions)
-            ax.set_xticklabels([f'{lead}h' for lead in sorted(lead_times)])
-            
-            # Set labels
-            ax.set_xlabel('Lead Time (hours)', fontsize=14)
-            ax.set_ylabel(metric, fontsize=14)
-            ax.set_title(f'{metric} across Lead Times', fontsize=16)
-            
-            # Add legend
-            ax.legend([plt.Rectangle((0,0), 1, 1, fc=colors[i % len(colors)]) for i in range(len(forecast_types))], 
-                     forecast_types, loc='best')
-            
-            plt.tight_layout()
-            
-            if save_fig:
-                plt.savefig(os.path.join(self.figures_path, f'{metric.lower()}_boxplots.png'), dpi=300, bbox_inches='tight')
-            
-            figs.append(fig)
+        lead_times = evaluation_df.index.get_level_values('Lead Time').unique()
         
         # Create a combined figure with all metrics
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         axes = axes.flatten()
         
         for i, metric in enumerate(metrics):
-            # Prepare data for box plots
-            data_for_metric = {}
-            for forecast in forecast_types:
-                data_for_metric[forecast] = []
-                for lead in sorted(lead_times):
+            # Prepare data for seaborn
+            plot_data = []
+            
+            # Go through all forecasts and lead times
+            for lead in sorted(lead_times):
+                for forecast in forecast_types:
                     try:
                         value = evaluation_df.loc[(forecast, lead), metric]
-                        data_for_metric[forecast].append(value)
+                        if not np.isnan(value):  # Filter out NaN values
+                            plot_data.append({
+                                'Forecast': forecast,
+                                'Lead Time': lead,
+                                metric: value
+                            })
                     except:
-                        data_for_metric[forecast].append(np.nan)
+                        pass
             
             # Create DataFrame for seaborn
-            plot_data = []
-            for forecast, values in data_for_metric.items():
-                for j, lead in enumerate(sorted(lead_times)):
-                    plot_data.append({
-                        'Forecast': forecast,
-                        'Lead Time': lead,
-                        metric: values[j]
-                    })
             plot_df = pd.DataFrame(plot_data)
             
-            # Create box plot with seaborn
-            sns.boxplot(x='Lead Time', y=metric, hue='Forecast', data=plot_df, ax=axes[i])
-            axes[i].set_title(metric)
-            
-            # Only show legend in first subplot
-            if i > 0:
-                axes[i].get_legend().remove()
+            # Only create plot if we have data
+            if not plot_df.empty:
+                # Create box plot with seaborn
+                sns.boxplot(x='Lead Time', y=metric, hue='Forecast', data=plot_df, ax=axes[i])
+                axes[i].set_title(metric)
+                
+                # Only show legend in first subplot
+                if i > 0:
+                    axes[i].get_legend().remove()
         
         plt.tight_layout()
         
@@ -241,15 +188,28 @@ class ForecastVisualizer:
 
 if __name__ == "__main__":
     # Example usage
-    from preprocess import DataPreprocessor
-    from predict import ForecastPredictor
-    from baseline import PersistenceBaseline
-    from evaluate import ForecastEvaluator
+    from nwm_dl_postprocessing.src.preprocess import DataPreprocessor
+    from nwm_dl_postprocessing.src.predict import ForecastPredictor
+    from nwm_dl_postprocessing.src.baseline import PersistenceBaseline
+    from nwm_dl_postprocessing.src.evaluate import ForecastEvaluator
+    import os
+    
+    # Define base paths as absolute paths
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_raw_path = os.path.join(base_dir, "data", "raw")
+    data_processed_path = os.path.join(base_dir, "data", "processed")
+    models_path = os.path.join(base_dir, "models")
+    reports_path = os.path.join(base_dir, "reports")
+    figures_path = os.path.join(reports_path, "figures")
+    
+    # Ensure directories exist
+    os.makedirs(data_processed_path, exist_ok=True)
+    os.makedirs(figures_path, exist_ok=True)
     
     # Load preprocessed data
     preprocessor = DataPreprocessor(
-        raw_data_path="../data/raw",
-        processed_data_path="../data/processed",
+        raw_data_path=data_raw_path,
+        processed_data_path=data_processed_path,
         sequence_length=24
     )
     
@@ -260,7 +220,8 @@ if __name__ == "__main__":
     test_df = test_data["df"]
     
     # Generate LSTM predictions
-    predictor = ForecastPredictor("../models/nwm_lstm_model.keras")
+    model_path = os.path.join(models_path, "test_model.keras")
+    predictor = ForecastPredictor(model_path)
     predictor.set_scaler(data["20380357"]["scalers"]["target"])
     lstm_corrected_df = predictor.generate_corrected_forecasts(test_data)
     
@@ -281,6 +242,8 @@ if __name__ == "__main__":
     evaluation_df = evaluator.evaluate_forecasts(results_df)
     
     # Create visualizations
-    visualizer = ForecastVisualizer()
+    visualizer = ForecastVisualizer(figures_path=figures_path)
     visualizer.create_runoff_boxplots(results_df)
     visualizer.create_metrics_boxplots(evaluation_df)
+    
+    print(f"Visualizations saved to {figures_path}")
