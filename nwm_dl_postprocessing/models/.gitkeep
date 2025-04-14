@@ -1,5 +1,0 @@
-# This file exists so that Git preserves the models directory structure
-# even when it contains no files.
-#
-# The models directory will store trained Seq2Seq LSTM models and is kept
-# empty in the repository due to file size constraints.
