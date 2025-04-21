@@ -48,9 +48,9 @@ The project is organized as follows to ensure clarity and reproducibility:
 
 ## Dependencies
 
-The project relies on the following Python packages, which can be installed using the provided `requirements.txt`:
+The project relies on the following Python packages, which can be installed using the provided `requirements.txt` using the Python interpreter's pip module:
 
-*   **Python 3.8+**: Core programming language
+*   **Python 3.10**: Core programming language (required for tensorflow-macos compatibility)
 *   **TensorFlow or PyTorch**: Deep learning framework for model development
 *   **Pandas**: Data manipulation and preprocessing
 *   **NumPy**: Numerical computations
@@ -62,7 +62,7 @@ The project relies on the following Python packages, which can be installed usin
 Install dependencies with:
 
 ```bash
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 ```
 
 ## Data Preprocessing
@@ -137,8 +137,9 @@ The project produces the following outputs for each station:
 2.  **Install Dependencies:** Run `pip install -r requirements.txt`.
 3.  **Preprocess Data:** Execute `python src/preprocess.py` to prepare datasets.
 4.  **Train Model:** Run `python src/train.py` to train the LSTM model.
-5.  **Evaluate Model:** Execute `python src/evaluate.py` to generate corrected forecasts, metrics, and plots.
-6.  **Review Results:** Check `results/` for plots and metric files.
+5.  **Hyperparameter Tuning:** Execute `python src/tune.py --station <station>` to search optimal hyperparameters per station.
+6.  **Evaluate Model:** Execute `python src/evaluate.py` to generate corrected forecasts, metrics, and plots.
+7.  **Review Results:** Check `results/` for plots and metric files.
 
 ## Notes
 

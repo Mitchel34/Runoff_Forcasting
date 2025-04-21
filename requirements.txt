@@ -1,0 +1,9 @@
+# Project dependencies
+tensorflow-macos==2.12.0  # pinned to macOS-compatible version with broader Python support
+keras-tuner>=1.0.2
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+pytest
