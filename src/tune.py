@@ -3,6 +3,7 @@ import sys
 import glob
 import numpy as np
 import argparse
+import tensorflow as tf  # Add tensorflow import
 import keras_tuner as kt
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
@@ -35,6 +36,7 @@ def model_builder(hp, window, horizon, features=1):
 
 
 def main():
+    tf.random.set_seed(42)  # Set the seed for reproducibility
     parser = argparse.ArgumentParser()
     parser.add_argument('--station', required=True, help='Station ID for tuning')
     parser.add_argument('--data-dir', default=os.path.join('data', 'processed'), help='Processed data directory')
@@ -68,7 +70,8 @@ def main():
         max_trials=args.max_trials,
         executions_per_trial=args.executions,
         directory=args.results_dir,
-        project_name=args.station
+        project_name=args.station,
+        seed=42  # Add seed to Keras Tuner for reproducible search space sampling
     )
     # Search
     tuner.search(X_train, y_train,

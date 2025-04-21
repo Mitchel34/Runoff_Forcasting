@@ -3,6 +3,7 @@ import sys
 import glob
 import numpy as np
 import argparse
+import tensorflow as tf  # Add tensorflow import
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 
@@ -25,6 +26,7 @@ def load_dataset(npz_path):
 
 
 def main():
+    tf.random.set_seed(42)  # Set the seed for reproducibility
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-dir', default=os.path.join('data', 'processed'), help='Processed data directory')
     parser.add_argument('--models-dir', default='models', help='Directory to save trained models')
