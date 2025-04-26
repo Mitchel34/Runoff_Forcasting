@@ -13,6 +13,7 @@ This project enhances the accuracy of the National Water Model (NWM) short-range
 
 ## Data Sources
 
+
 *   **NWM Forecasts:** Hourly short-range forecasts (lead times 1–18 hours) for two US stations, from April 2021 to April 2023. Files are named `streamflow_[streamID]_[YYYYMM].csv` and include columns like `model_output_valid_time` and `streamflow_value`.
 *   **USGS Observations:** Hourly observed runoff data for the same period, in CSV files named `*_Strt_*.csv`, with columns like `DateTime` and `USGSFlowValue`.
 *   **Optional Inputs:** Precipitation or other meteorological data from public datasets, if incorporated into the model.
