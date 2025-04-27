@@ -43,15 +43,91 @@ This preprocessing ensures that the data fed into the models is appropriately st
 
 ## 3. Model Development
 
-[Details about LSTM and Transformer architectures.]
+Two distinct deep learning architectures were implemented, tailored to the characteristics of each station:
+
+### 3.1 LSTM Model (Station 21609641)
+
+Implemented in `src/models/lstm.py`, this model uses a Long Short-Term Memory (LSTM) network, suitable for capturing temporal dependencies in the more predictable runoff patterns of station 21609641.
+
+-   **Framework:** TensorFlow/Keras
+-   **Architecture:**
+    -   Input Layer: Takes sequences of shape `(window_size, num_features)`, e.g., (24, 36).
+    -   LSTM Layer: A single `tf.keras.layers.LSTM` layer processes the input sequence. The number of units (`lstm_units`) is a key hyperparameter. `return_sequences=False` is used, as only the final hidden state is needed to predict the errors for all subsequent lead times based on the input sequence.
+    -   Output Layer: A `tf.keras.layers.Dense` layer maps the LSTM layer's output to the 18 target error values (one for each lead time from 1 to 18 hours).
+-   **Function:** The `build_lstm_model` function constructs this Keras model.
+
+### 3.2 Transformer Model (Station 20380357)
+
+Implemented in `src/models/transformer.py`, this model utilizes a Transformer architecture, based on the "Attention Is All You Need" paper (Vaswani et al., 2017). This architecture is chosen for station 20380357 due to its potential to capture complex, non-sequential patterns often found in challenging hydrological regimes.
+
+-   **Framework:** TensorFlow/Keras
+-   **Architecture:**
+    -   Input Layer: Takes sequences of shape `(window_size, num_features)`, e.g., (24, 36).
+    -   Transformer Encoder Blocks: The core of the model consists of multiple stacked `transformer_encoder_block` units (number controlled by `num_encoder_blocks`). Each block contains:
+        -   Multi-Head Self-Attention (`tf.keras.layers.MultiHeadAttention`): Allows the model to weigh the importance of different parts of the input sequence. Key hyperparameters include `num_heads` and `head_size`.
+        -   Feed-Forward Network: Two dense layers with ReLU activation, controlled by `ff_dim`.
+        -   Layer Normalization and Dropout: Applied within the block for stabilization and regularization (`dropout` hyperparameter).
+        -   Residual Connections: Used around the attention and feed-forward sub-layers.
+    -   Pooling Layer: `tf.keras.layers.GlobalAveragePooling1D` aggregates the outputs across the sequence dimension after the final encoder block.
+    -   MLP Head: A final Multi-Layer Perceptron (consisting of Dense layers, configurable via `mlp_units` and `mlp_dropout`) maps the pooled representation to the 18 target error values.
+-   **Function:** The `build_transformer_model` function constructs this Keras model.
 
 ## 4. Training and Tuning
 
-[Details about training process, hyperparameters, tuning.]
+The process of training the models and optimizing their hyperparameters is managed by dedicated scripts.
+
+### 4.1 Utility Functions (`src/utils.py`)
+
+This script centralizes helper functions, primarily the calculation of evaluation metrics required by the project:
+-   `calculate_cc`: Pearson Correlation Coefficient.
+-   `calculate_rmse`: Root Mean Square Error.
+-   `calculate_pbias`: Percent Bias.
+-   `calculate_nse`: Nash-Sutcliffe Efficiency.
+These functions include basic handling for NaN values and potential division-by-zero errors.
+
+### 4.2 Hyperparameter Tuning (`src/tune.py`)
+
+This script automates the search for optimal hyperparameters using the Keras Tuner library.
+-   **Objective:** Minimize validation loss (`mse`).
+-   **Methodology:** Supports both `Hyperband` (for broad, fast exploration) and `BayesianOptimization` (for efficient convergence). A hybrid approach (Hyperband followed by Bayesian) is recommended.
+-   **HyperModels:** Defines `LSTMHyperModel` and `TransformerHyperModel` classes that specify the model architecture and the search space for hyperparameters (e.g., `lstm_units`, `dropout_rate`, `learning_rate`, `num_encoder_blocks`, `num_heads`, `ff_dim`).
+-   **Process:**
+    1.  Loads training data and creates a time-series consistent validation split (using `train_test_split` with `shuffle=False`).
+    2.  Instantiates the specified tuner (`Hyperband` or `BayesianOptimization`).
+    3.  Runs the `tuner.search()` method, training multiple model configurations.
+    4.  Uses `EarlyStopping` within each trial to save time.
+    5.  Reports the best hyperparameter combination found based on validation loss.
+-   **Usage:** Accepts command-line arguments for station, model type, tuner type, and search parameters.
+
+### 4.3 Model Training (`src/train.py`)
+
+This script trains a single model instance using specified (or default/tuned) hyperparameters.
+-   **Process:**
+    1.  Loads preprocessed training data for the specified station.
+    2.  Builds the specified model (LSTM or Transformer) using the provided hyperparameters.
+    3.  Compiles the model with the Adam optimizer and Mean Squared Error (MSE) loss.
+    4.  Sets up callbacks: `EarlyStopping` (monitors `val_loss`), `ModelCheckpoint` (saves the best model based on `val_loss` to `models/`), and `ReduceLROnPlateau`.
+    5.  Trains the model using `model.fit()` with a `validation_split` of the training data.
+-   **Usage:** Accepts command-line arguments for station, model type, epochs, batch size, learning rate, and model-specific hyperparameters (e.g., `--lstm_units`, `--tf_heads`). The best hyperparameters identified by `tune.py` should be passed here for final model training.
 
 ## 5. Evaluation
 
-[Metrics, visualizations, comparison.]
+The performance of the trained models is assessed using the `src/evaluate.py` script on the held-out test set.
+
+-   **Process:**
+    1.  Loads the best trained model (`.keras` file) for the specified station and model type from the `models/` directory.
+    2.  Loads the corresponding test data (`X_test`, `y_test_scaled`) and the essential metadata (`nwm_test_original`, `usgs_test_original`) saved during preprocessing.
+    3.  Loads the `y_scaler` to inverse-transform predictions.
+    4.  Generates error predictions using `model.predict()`.
+    5.  Inverse-transforms the predicted errors.
+    6.  Calculates the corrected NWM forecast: `Corrected = NWM_Original - Predicted_Error`.
+    7.  For each lead time (1-18 hours):
+        -   Calculates CC, RMSE, PBIAS, and NSE comparing USGS observations against both the original NWM forecast and the corrected forecast.
+    8.  Saves the computed metrics to a CSV file in `results/metrics/`.
+    9.  Generates and saves two box plots to `results/plots/`:
+        -   Runoff Comparison: Observed vs. NWM vs. Corrected runoff per lead time.
+        -   Metrics Comparison: NWM vs. Corrected metrics (CC, RMSE, PBIAS, NSE) per lead time.
+-   **Usage:** Accepts command-line arguments for `station_id` and `model_type`.
 
 ## 6. Results and Discussion
 

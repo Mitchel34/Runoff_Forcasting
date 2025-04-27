@@ -18,6 +18,7 @@ runoff_forecasting/
 │   │   └── transformer.py    # Transformer implementation for station 20380357
 │   ├── train.py              # Model training script
 │   ├── evaluate.py           # Evaluation and visualization
+│   ├── tune.py               # Hyperparameter tuning script
 │   └── utils.py              # Utility functions and metrics
 ├── notebooks/                # Exploratory data analysis
 ├── results/                  # Saved results and visualizations
@@ -86,23 +87,66 @@ You can override these defaults if needed, e.g.:
 python src/preprocess.py --window-size 48 --output-dir data/processed_ws48
 ```
 
+## Hyperparameter Tuning
+
+Before final training, hyperparameter tuning is performed using `src/tune.py` to find the optimal configuration for each model (LSTM and Transformer).
+
+-   **Library:** Keras Tuner
+-   **Strategy:** A hybrid approach is recommended:
+    1.  **Hyperband:** Run first for broad exploration (`--tuner hyperband`).
+    2.  **Bayesian Optimization:** Run second to refine promising configurations (`--tuner bayesian`).
+-   **Process:** The script trains multiple model versions with different hyperparameter combinations (learning rate, layer sizes, dropout, etc.) on a validation split of the training data, aiming to minimize validation loss.
+-   **Output:** The best hyperparameters found are printed to the console.
+
+**Example Tuning Commands (run from project root):**
+
+```bash
+# 1. Hyperband Tuning (Example for LSTM)
+python src/tune.py --station_id 21609641 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 64
+
+# 2. Bayesian Optimization Tuning (Example for LSTM, after reviewing Hyperband results)
+python src/tune.py --station_id 21609641 --model_type lstm --tuner bayesian --max_trials 20 --epochs_per_trial 50 --batch_size 64
+
+# (Repeat for Transformer on station 20380357)
+python src/tune.py --station_id 20380357 --model_type transformer --tuner hyperband ...
+python src/tune.py --station_id 20380357 --model_type transformer --tuner bayesian ...
+```
+
 ## Workflow
 
-1. **Preprocess data**:
-```bash
-python src/preprocess.py
-```
+1.  **Preprocess data**:
+    ```bash
+    python src/preprocess.py
+    ```
 
-2. **Train models**:
-```bash
-python src/train.py --station 21609641  # LSTM for station 21609641
-python src/train.py --station 20380357  # Transformer for station 20380357
-```
+2.  **(Optional but Recommended) Hyperparameter Tuning**:
+    *   Run Hyperband:
+        ```bash
+        python src/tune.py --station_id <station_id> --model_type <lstm|transformer> --tuner hyperband ...
+        ```
+    *   Run Bayesian Optimization (potentially refining search space based on Hyperband):
+        ```bash
+        python src/tune.py --station_id <station_id> --model_type <lstm|transformer> --tuner bayesian ...
+        ```
+    *   Note the best hyperparameters found for each station/model.
 
-3. **Evaluate and visualize results**:
-```bash
-python src/evaluate.py
-```
+3.  **Train final models** (using best hyperparameters from tuning):
+    ```bash
+    # Example for LSTM (Station 21609641)
+    python src/train.py --station_id 21609641 --model_type lstm --epochs 100 --batch_size <best_batch> --lr <best_lr> --lstm_units <best_units> # Add other tuned params
+
+    # Example for Transformer (Station 20380357)
+    python src/train.py --station_id 20380357 --model_type transformer --epochs 100 --batch_size <best_batch> --lr <best_lr> --tf_heads <best_heads> --tf_ff_dim <best_ff_dim> --tf_blocks <best_blocks> --tf_dropout <best_dropout> # Add other tuned params
+    ```
+
+4.  **Evaluate and visualize results**:
+    ```bash
+    # Evaluate LSTM
+    python src/evaluate.py --station_id 21609641 --model_type lstm
+
+    # Evaluate Transformer
+    python src/evaluate.py --station_id 20380357 --model_type transformer
+    ```
 
 ## Evaluation Metrics
 
