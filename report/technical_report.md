@@ -94,10 +94,11 @@ This script automates the search for optimal hyperparameters using the Keras Tun
 -   **Process:**
     1.  Loads training data and creates a time-series consistent validation split (using `train_test_split` with `shuffle=False`).
     2.  Instantiates the specified tuner (`Hyperband` or `BayesianOptimization`).
-    3.  Runs the `tuner.search()` method, training multiple model configurations.
-    4.  Uses `EarlyStopping` within each trial to save time.
-    5.  Reports the best hyperparameter combination found based on validation loss.
--   **Usage:** Accepts command-line arguments for station, model type, tuner type, and search parameters.
+    3.  Runs the `tuner.search()` method, training multiple model configurations on the training data and evaluating them on the validation data.
+    4.  Uses `EarlyStopping` within each trial to prevent wasted computation.
+-   **Output:**
+    1.  Prints a summary of the tuning results and the best hyperparameters found to the console.
+    2.  Saves the best hyperparameters dictionary to a JSON file in the `results/hyperparameters/` directory (e.g., `results/hyperparameters/<station_id>_<model_type>_best_hps.json`). This file provides a persistent record and can be used to configure the final model training in `train.py`.
 
 ### 4.3 Model Training (`src/train.py`)
 

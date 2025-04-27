@@ -6,6 +6,7 @@ Uses command-line arguments to specify station, model type, and hyperparameters.
 """
 import argparse
 import os
+import json
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
@@ -19,6 +20,7 @@ from models.transformer import build_transformer_model
 PROCESSED_DATA_DIR = os.path.join('..', 'data', 'processed')
 MODELS_SAVE_DIR = os.path.join('..', 'models')
 SCALERS_DIR = os.path.join(PROCESSED_DATA_DIR, 'scalers')
+TUNER_LOG_DIR = os.path.join('..', 'tuner_logs') # For potentially loading HPs
 
 def load_data(station_id, data_type='train'):
     """Loads preprocessed data for a given station and type (train/test)."""
@@ -42,10 +44,10 @@ def load_scaler(station_id, scaler_type='X'):
     print(f"Loaded {scaler_type} scaler for station {station_id} from {scaler_path}")
     return scaler
 
-def train_model(station_id, model_type, epochs, batch_size, learning_rate, lstm_units=64,
-                transformer_params=None):
-    """Trains the specified model for the given station."""
+def train_model(station_id, model_type, epochs, batch_size, hyperparameters):
+    """Trains the specified model for the given station using provided hyperparameters."""
     print(f"Starting training for Station {station_id} using {model_type.upper()} model.")
+    print("Using hyperparameters:", hyperparameters)
 
     # Load training data
     X_train, y_train = load_data(station_id, 'train')
@@ -55,17 +57,26 @@ def train_model(station_id, model_type, epochs, batch_size, learning_rate, lstm_
     output_units = y_train.shape[1] # Should be 18 (for 18 lead times)
     print(f"Input shape: {input_shape}, Output units: {output_units}")
 
-    # Build the model
+    # Build the model using hyperparameters from the dictionary
     if model_type.lower() == 'lstm':
-        model = build_lstm_model(input_shape, lstm_units=lstm_units, output_units=output_units)
+        # Extract LSTM specific HPs, provide defaults if not found
+        lstm_units = hyperparameters.get('lstm_units', 64)
+        model = build_lstm_model(
+            input_shape,
+            lstm_units=lstm_units,
+            output_units=output_units
+        )
     elif model_type.lower() == 'transformer':
-        if transformer_params is None:
-            # Default parameters if none provided
-            transformer_params = {
-                'head_size': 256, 'num_heads': 4, 'ff_dim': 128,
-                'num_encoder_blocks': 4, 'dropout': 0.1, 'mlp_units': [128], 'mlp_dropout': 0.1
-            }
-            print("Using default Transformer parameters.")
+        # Extract Transformer specific HPs, provide defaults if not found
+        transformer_params = {
+            'head_size': hyperparameters.get('head_size', 256),
+            'num_heads': hyperparameters.get('num_heads', 4),
+            'ff_dim': hyperparameters.get('ff_dim', 128),
+            'num_encoder_blocks': hyperparameters.get('num_encoder_blocks', 4),
+            'dropout': hyperparameters.get('dropout_rate', 0.1),
+            'mlp_units': hyperparameters.get('mlp_units', [128]),
+            'mlp_dropout': hyperparameters.get('mlp_dropout', hyperparameters.get('dropout_rate', 0.1))
+        }
         model = build_transformer_model(
             input_shape=input_shape,
             output_units=output_units,
@@ -76,7 +87,8 @@ def train_model(station_id, model_type, epochs, batch_size, learning_rate, lstm_
 
     model.summary()
 
-    # Compile the model
+    # Compile the model - Use learning rate from HPs
+    learning_rate = hyperparameters.get('learning_rate', 1e-3)
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
     model.compile(optimizer=optimizer, loss='mse') # Mean Squared Error for regression
 
@@ -90,26 +102,19 @@ def train_model(station_id, model_type, epochs, batch_size, learning_rate, lstm_
         ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6, verbose=1)
     ]
 
-    # Train the model (using a portion of training data as validation)
-    # Note: A separate validation set is ideal, but for simplicity, we use validation_split.
-    # Ensure shuffle=True for representative validation split.
+    # Train the model
     print("\nStarting model training...")
     history = model.fit(
         X_train, y_train,
         epochs=epochs,
         batch_size=batch_size,
-        validation_split=0.2, # Use 20% of training data for validation
+        validation_split=0.2,
         callbacks=callbacks,
         shuffle=True,
         verbose=1
     )
 
     print(f"\nTraining complete. Best model saved to {model_save_path}")
-
-    # Optional: Load test data to evaluate final model on it (or do this in evaluate.py)
-    # X_test, y_test = load_data(station_id, 'test')
-    # test_loss = model.evaluate(X_test, y_test, verbose=0)
-    # print(f"Final model evaluation on test set - Loss: {test_loss:.4f}")
 
     return history, model_save_path
 
@@ -120,40 +125,51 @@ if __name__ == "__main__":
     parser.add_argument("--model_type", type=str, required=True, choices=['lstm', 'transformer'], help="Model type to train")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=64, help="Training batch size")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
-    # Add model-specific args if needed, e.g., --lstm_units
-    parser.add_argument("--lstm_units", type=int, default=64, help="Number of units in LSTM layer (if model_type is lstm)")
-    # For Transformer, consider passing params as a JSON string or individual args
-    # Example (simplified):
-    parser.add_argument("--tf_heads", type=int, default=4, help="Transformer heads")
-    parser.add_argument("--tf_ff_dim", type=int, default=128, help="Transformer feed-forward dim")
-    parser.add_argument("--tf_blocks", type=int, default=4, help="Transformer encoder blocks")
-    parser.add_argument("--tf_dropout", type=float, default=0.1, help="Transformer dropout")
+    parser.add_argument("--hp_json_path", type=str, default=None, help="Optional path to a JSON file containing hyperparameters from tuning.")
 
+    # Add arguments for hyperparameters (used if JSON is not provided or as overrides/defaults)
+    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate (used if not in JSON)")
+    parser.add_argument("--lstm_units", type=int, default=64, help="LSTM units (used if not in JSON)")
+    parser.add_argument("--num_heads", type=int, default=4, help="Transformer heads (used if not in JSON)")
+    parser.add_argument("--ff_dim", type=int, default=128, help="Transformer feed-forward dim (used if not in JSON)")
+    parser.add_argument("--num_encoder_blocks", type=int, default=4, help="Transformer encoder blocks (used if not in JSON)")
+    parser.add_argument("--dropout_rate", type=float, default=0.1, help="Transformer dropout rate (used if not in JSON)")
 
     args = parser.parse_args()
 
-    # Prepare transformer params if needed
-    transformer_params = None
-    if args.model_type.lower() == 'transformer':
-         transformer_params = {
-            'head_size': 256, # Keep head_size somewhat fixed or add arg
-            'num_heads': args.tf_heads,
-            'ff_dim': args.tf_ff_dim,
-            'num_encoder_blocks': args.tf_blocks,
-            'dropout': args.tf_dropout,
-            'mlp_units': [128], # Keep fixed or add arg
-            'mlp_dropout': args.tf_dropout # Reuse dropout or add specific arg
-        }
+    # Load hyperparameters
+    hyperparameters = {}
+    if args.hp_json_path:
+        try:
+            with open(args.hp_json_path, 'r') as f:
+                hyperparameters = json.load(f)
+            print(f"Loaded hyperparameters from {args.hp_json_path}")
+        except FileNotFoundError:
+            print(f"Warning: Hyperparameter JSON file not found at {args.hp_json_path}. Using command-line defaults/args.")
+        except json.JSONDecodeError:
+            print(f"Warning: Error decoding JSON from {args.hp_json_path}. Using command-line defaults/args.")
 
+    # Populate hyperparameters dictionary, prioritizing JSON values, then command-line args
+    hyperparameters.setdefault('learning_rate', args.learning_rate)
+
+    # LSTM specific
+    if args.model_type.lower() == 'lstm':
+        hyperparameters.setdefault('lstm_units', args.lstm_units)
+
+    # Transformer specific
+    elif args.model_type.lower() == 'transformer':
+        hyperparameters.setdefault('num_heads', args.num_heads)
+        hyperparameters.setdefault('ff_dim', args.ff_dim)
+        hyperparameters.setdefault('num_encoder_blocks', args.num_encoder_blocks)
+        hyperparameters.setdefault('dropout_rate', args.dropout_rate)
+
+    # Pass the consolidated hyperparameters dictionary
     train_model(
         station_id=args.station_id,
         model_type=args.model_type,
         epochs=args.epochs,
         batch_size=args.batch_size,
-        learning_rate=args.lr,
-        lstm_units=args.lstm_units,
-        transformer_params=transformer_params
+        hyperparameters=hyperparameters
     )
 
     print("\nScript finished.")

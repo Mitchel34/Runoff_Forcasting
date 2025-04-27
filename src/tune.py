@@ -6,6 +6,7 @@ Uses Hyperband or BayesianOptimization to find optimal hyperparameters.
 
 import argparse
 import os
+import json # Ensure json is imported at the top
 import numpy as np
 import tensorflow as tf
 import keras_tuner as kt
@@ -20,6 +21,7 @@ from train import load_data # Reuse data loading function from train.py
 # Define paths
 PROCESSED_DATA_DIR = os.path.join('..', 'data', 'processed')
 TUNER_LOG_DIR = os.path.join('..', 'tuner_logs') # Directory to store tuning results
+HYPERPARAMS_SAVE_DIR = os.path.join('..', 'results', 'hyperparameters') # Directory to save best HPs
 
 class LSTMHyperModel(kt.HyperModel):
     """Keras Tuner HyperModel for LSTM."""
@@ -152,15 +154,27 @@ def run_tuning(station_id, model_type, max_trials, epochs_per_trial, batch_size,
     # Get the best hyperparameters
     best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
     print("\nBest Hyperparameters Found:")
-    for param, value in best_hps.values.items():
-        print(f"  {param}: {value}")
+    best_hps_dict = best_hps.values
+    print(json.dumps(best_hps_dict, indent=4)) # Pretty print the dictionary
+
+    # Save the best hyperparameters to a JSON file
+    try:
+        save_filename = f"{station_id}_{model_type.lower()}_best_hps.json"
+        save_path = os.path.join(HYPERPARAMS_SAVE_DIR, save_filename)
+        # Ensure the directory exists
+        os.makedirs(HYPERPARAMS_SAVE_DIR, exist_ok=True) # Use the defined constant
+        with open(save_path, 'w') as f:
+            json.dump(best_hps_dict, f, indent=4)
+        print(f"\nBest hyperparameters saved to: {save_path}")
+    except Exception as e:
+        print(f"\nError saving hyperparameters to JSON: {e}")
 
     # Optional: Build the best model and train it on full data (or do this in train.py)
     # best_model = tuner.hypermodel.build(best_hps)
     # history = best_model.fit(X, y, epochs=..., batch_size=..., validation_split=0.2)
-    # best_model.save(...) 
+    # best_model.save(...)
 
-    print(f"\nTo retrain the best model, use the hyperparameters above with train.py")
+    print(f"\nTo retrain the best model, use the hyperparameters above or load from {save_path} for train.py")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hyperparameter tuning for runoff error correction models.")

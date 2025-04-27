@@ -96,7 +96,7 @@ Before final training, hyperparameter tuning is performed using `src/tune.py` to
     1.  **Hyperband:** Run first for broad exploration (`--tuner hyperband`).
     2.  **Bayesian Optimization:** Run second to refine promising configurations (`--tuner bayesian`).
 -   **Process:** The script trains multiple model versions with different hyperparameter combinations (learning rate, layer sizes, dropout, etc.) on a validation split of the training data, aiming to minimize validation loss.
--   **Output:** The best hyperparameters found are printed to the console.
+-   **Output:** The best hyperparameters found are printed to the console and saved to a JSON file in the `results/hyperparameters/` directory (e.g., `results/hyperparameters/21609641_lstm_best_hps.json`). This file can be used to configure the final training in `train.py`.
 
 **Example Tuning Commands (run from project root):**
 
@@ -104,12 +104,8 @@ Before final training, hyperparameter tuning is performed using `src/tune.py` to
 # 1. Hyperband Tuning (Example for LSTM)
 python src/tune.py --station_id 21609641 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 64
 
-# 2. Bayesian Optimization Tuning (Example for LSTM, after reviewing Hyperband results)
-python src/tune.py --station_id 21609641 --model_type lstm --tuner bayesian --max_trials 20 --epochs_per_trial 50 --batch_size 64
-
-# (Repeat for Transformer on station 20380357)
-python src/tune.py --station_id 20380357 --model_type transformer --tuner hyperband ...
-python src/tune.py --station_id 20380357 --model_type transformer --tuner bayesian ...
+# 2. Bayesian Optimization Tuning (Example for Transformer, refining after Hyperband)
+python src/tune.py --station_id 20380357 --model_type transformer --tuner bayesian --max_trials 30 --epochs_per_trial 80 --batch_size 64
 ```
 
 ## Workflow
