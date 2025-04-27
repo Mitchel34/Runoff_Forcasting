@@ -252,6 +252,15 @@ def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18
     print(f"Scaled Train X: {X_train_scaled.shape}, Scaled Test X: {X_test_scaled.shape}")
     print(f"Scaled Train y: {y_train_scaled.shape}, Scaled Test y: {y_test_scaled.shape}")
 
+    # Get original NWM and USGS data corresponding to the test sequences
+    # Use the test_indices which map back to the original pivot_data
+    nwm_test_original = pivot_data[[f'nwm_flow_{i}' for i in range(1, horizon + 1)]].iloc[test_indices].values
+    usgs_test_original = pivot_data[[f'usgs_flow_{i}' for i in range(1, horizon + 1)]].iloc[test_indices].values
+    # --- ADDITION: Get timestamps for the test set ---
+    # These timestamps correspond to the end of the input sequence window.
+    # The forecast target is for the hour *after* this timestamp.
+    test_timestamps = pivot_data.index[test_indices].values # Get as numpy array for saving
+
     # Save processed data and scalers
     train_dir = os.path.join(output_dir, 'train')
     test_dir = os.path.join(output_dir, 'test')
@@ -266,8 +275,15 @@ def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18
     x_scaler_file = os.path.join(scaler_dir, f"{station_id}_x_scaler.joblib")
     y_scaler_file = os.path.join(scaler_dir, f"{station_id}_y_scaler.joblib")
     
-    np.savez(train_file, X=X_train_scaled, y=y_train_scaled)
-    np.savez(test_file, X=X_test_scaled, y=y_test_scaled)
+    # Save with keys expected by evaluate.py, including timestamps
+    np.savez(train_file, X_train=X_train_scaled, y_train_scaled=y_train_scaled)
+    np.savez(test_file, 
+             X_test=X_test_scaled, 
+             y_test_scaled=y_test_scaled, 
+             nwm_test_original=nwm_test_original, 
+             usgs_test_original=usgs_test_original,
+             test_timestamps=test_timestamps) # <-- Added timestamps
+    
     joblib.dump(x_scaler, x_scaler_file)
     joblib.dump(y_scaler, y_scaler_file)
     

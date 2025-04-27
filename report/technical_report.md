@@ -37,7 +37,7 @@ The preprocessing pipeline, implemented in `src/preprocess.py`, performed the fo
 11. **Data Scaling:** `StandardScaler` from scikit-learn was used to scale the data.
     *   An `x_scaler` was fitted *only* on the training features (`X_train`) and used to transform both `X_train` and `X_test`.
     *   A `y_scaler` was fitted *only* on the training targets (`y_train`) and used to transform both `y_train` and `y_test`.
-12. **Saving Processed Data:** The scaled training and testing sequences (X and y) were saved as `.npz` files in `data/processed/train/` and `data/processed/test/`. The fitted `x_scaler` and `y_scaler` objects were saved using `joblib` to `data/processed/scalers/` for later use during evaluation and inference.
+12. **Saving Processed Data:** The scaled training and testing sequences (X and y), along with the original NWM and USGS flow values corresponding to the test set targets (`nwm_test_original`, `usgs_test_original`), and the timestamps for the test sequences (`test_timestamps`), were saved as `.npz` files in `data/processed/train/` and `data/processed/test/`. The fitted `x_scaler` and `y_scaler` objects were saved using `joblib` to `data/processed/scalers/` for later use during evaluation and inference.
 
 This preprocessing ensures that the data fed into the models is appropriately structured, scaled, and split for training and evaluation.
 
@@ -117,22 +117,51 @@ The performance of the trained models is assessed using the `src/evaluate.py` sc
 
 -   **Process:**
     1.  Loads the best trained model (`.keras` file) for the specified station and model type from the `models/` directory.
-    2.  Loads the corresponding test data (`X_test`, `y_test_scaled`) and the essential metadata (`nwm_test_original`, `usgs_test_original`) saved during preprocessing.
+    2.  Loads the corresponding test data (`X_test`, `y_test_scaled`) and the essential metadata (`nwm_test_original`, `usgs_test_original`, `test_timestamps`) saved during preprocessing.
     3.  Loads the `y_scaler` to inverse-transform predictions.
     4.  Generates error predictions using `model.predict()`.
-    5.  Inverse-transforms the predicted errors.
-    6.  Calculates the corrected NWM forecast: `Corrected = NWM_Original - Predicted_Error`.
-    7.  For each lead time (1-18 hours):
-        -   Calculates CC, RMSE, PBIAS, and NSE comparing USGS observations against both the original NWM forecast and the corrected forecast.
-    8.  Saves the computed metrics to a CSV file in `results/metrics/`.
-    9.  Generates and saves two box plots to `results/plots/`:
-        -   Runoff Comparison: Observed vs. NWM vs. Corrected runoff per lead time.
-        -   Metrics Comparison: NWM vs. Corrected metrics (CC, RMSE, PBIAS, NSE) per lead time.
+    5.  Inverse-transforms the predicted errors (`predicted_errors_unscaled`).
+    6.  Calculates the corrected NWM forecast using the formula: `Corrected = NWM_Original + Predicted_Error`. This formula is used because the error was defined as `USGS - NWM` during preprocessing, so adding the predicted error to the NWM forecast aims to bring it closer to the observed USGS value.
+    7.  Calculates overall evaluation metrics (CC, RMSE, PBIAS, NSE) for each lead time (1-18 hours) by comparing USGS observations against both the original NWM forecast and the corrected forecast.
+    8.  Saves the computed overall metrics to a CSV file in `results/metrics/`.
+    9.  Calculates monthly evaluation metrics (CC, RMSE, PBIAS, NSE) for each lead time by grouping the test set results by month using the `test_timestamps`. This provides insight into the variability of performance over the test period.
+    10. Generates and saves plots to `results/plots/`:
+        -   Runoff Comparison Box Plot: Observed vs. NWM vs. Corrected runoff per lead time (e.g., `*_runoff_boxplot.png`).
+        -   Overall Metrics Line Plots: NWM vs. Corrected metrics (CC, RMSE, PBIAS, NSE) per lead time (e.g., `*_CC_lineplot.png`).
+        -   Monthly Metric Distribution Box Plots: Distribution of monthly CC, RMSE, PBIAS, and NSE values for NWM vs. Corrected forecasts across lead times (e.g., `*_RMSE_distribution_boxplot.png`).
 -   **Usage:** Accepts command-line arguments for `station_id` and `model_type`.
 
 ## 6. Results and Discussion
 
-[Analysis of results, comparison between stations/models.]
+The evaluation process assessed the performance of the trained error correction models against the original NWM forecasts using the held-out test set (October 1, 2022 - April 2023). Metrics (CC, RMSE, PBIAS, NSE) were calculated for each lead time from 1 to 18 hours. The overall results are summarized in CSV files within `results/metrics/` and visualized in line plots within `results/plots/`. Additionally, the distribution and variance of performance across the test period were analyzed by calculating metrics on a monthly basis and visualizing these distributions using box plots (e.g., `*_distribution_boxplot.png`).
+
+### 6.1 Station 21609641 (LSTM Model)
+
+-   **NWM Baseline Performance:** The raw NWM forecasts exhibited high correlation (CC > 0.96) but suffered from significant overprediction, indicated by large positive PBIAS (ranging from ~1600% to over 3200%) and high RMSE (~11-21 cms). Consequently, NSE values were extremely poor (highly negative, between -1900 and -540).
+-   **LSTM Correction Performance:** The LSTM model successfully addressed the major weaknesses of the NWM baseline:
+    -   **RMSE Reduction:** Corrected RMSE was substantially lower (~5-9 cms) than NWM RMSE across all lead times.
+    -   **Bias Correction:** PBIAS was drastically reduced, hovering much closer to zero (mostly between -20% and -60%), indicating effective mitigation of the systematic overprediction.
+    -   **NSE Improvement:** Corrected NSE values were significantly better (less negative, ~-120 to -350) than NWM NSE. However, they remained consistently below zero, signifying that the corrected forecast, while an improvement over NWM, was still less accurate than a simple forecast based on the mean observed flow.
+    -   **Correlation:** A notable trade-off was observed in the Correlation Coefficient (CC), which dropped significantly after correction (~0.2-0.3). This suggests the model, while correcting magnitude and bias, disrupted the fine temporal correlation captured by the original NWM.
+-   **Summary:** For this station, the LSTM model provided a clear benefit by reducing error magnitude and bias, as visually confirmed by the RMSE and PBIAS line plots (e.g., `21609641_lstm_RMSE_lineplot.png`, `21609641_lstm_PBIAS_lineplot.png`). However, the negative NSE and reduced CC indicate limitations in capturing the precise flow dynamics.
+
+### 6.2 Station 20380357 (Transformer Model)
+
+-   **NWM Baseline Performance:** The raw NWM forecasts for this station were exceptionally poor, rendering them practically unusable. Correlation (CC) was near zero (< 0.05), RMSE was extremely high and increased with lead time (~9-97 cms), PBIAS reached astronomical levels (tens of thousands to over a million percent), and NSE values were catastrophically negative (in the millions to hundreds of millions).
+-   **Transformer Correction Performance:** The Transformer model failed to provide meaningful error correction for this challenging station:
+    -   **RMSE:** Although lower than the NWM baseline, the corrected RMSE remained very high (~4-29 cms) and increased with lead time.
+    -   **Bias Correction:** PBIAS remained erratic and often large, indicating the model failed to consistently address the severe bias issues.
+    -   **NSE:** Corrected NSE values stayed extremely negative (hundreds of thousands to tens of millions). While technically an improvement over the NWM baseline's NSE, the performance remained far below acceptable levels.
+    -   **Correlation:** Corrected CC stayed near zero or negative, showing no meaningful relationship with observed flow.
+-   **Summary:** The Transformer model struggled significantly with the complex dynamics and poor baseline forecast quality of station 20380357. The evaluation metrics and corresponding line plots (e.g., `20380357_transformer_RMSE_lineplot.png`, `20380357_transformer_NSE_lineplot.png`) clearly show that the error correction attempt was unsuccessful for this station.
+
+### 6.3 Overall Discussion
+
+The results highlight the station-dependent nature of NWM forecast errors and the varying success of deep learning correction models. The LSTM showed promise for the station with relatively better (though still biased) NWM performance, primarily by correcting systematic bias. The Transformer, despite its architectural sophistication, could not overcome the extremely poor quality of the baseline NWM forecast for the more challenging station. The monthly distribution plots provide further context, showing the consistency (or lack thereof) of the model's improvement over the NWM baseline across different months within the test period.
+
+This suggests that the quality of the input physical model forecast is a critical factor. Error correction models may struggle significantly when the baseline forecast lacks fundamental skill (as indicated by near-zero CC and extremely high bias/RMSE).
+
+Furthermore, the persistent warning during evaluation regarding the mismatch between inverse-scaled true errors (`y_test_scaled`) and errors calculated directly (`usgs_test_original - nwm_test_original`) should be noted. While the formula for applying the correction was verified and corrected in `evaluate.py`, this separate warning, likely stemming from floating-point differences amplified by scaling/unscaling, suggests potential minor inaccuracies in the absolute metric values reported. The large maximum differences reported previously warrant caution, although the relative comparison between NWM and Corrected performance and the trends shown in the plots remain valid. Further investigation into the `preprocess.py` script's scaling and error calculation steps could clarify this discrepancy.
 
 ## 7. Conclusion and Future Work
 
