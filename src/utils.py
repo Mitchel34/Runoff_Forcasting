@@ -113,67 +113,67 @@ def calculate_metrics_over_windows(observed: np.ndarray, predicted: np.ndarray,
     return metrics
 
 
-def create_sequences(data: pd.DataFrame, window_size: int, horizon: int) -> Tuple[np.ndarray, np.ndarray]:
+def create_sequences(data_array: np.ndarray, window_size: int, horizon: int = 1) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Create input-output sequences from the data for time series modeling.
+    Create input sequences from a NumPy array.
     
     Args:
-        data: DataFrame with aligned NWM forecasts and USGS observations
+        data_array: NumPy array with time series data (samples, features)
         window_size: Number of past time steps to use as input
-        horizon: Number of future time steps to predict
+        horizon: Number of future time steps (typically 1 when targets are selected separately)
         
     Returns:
-        X: Input sequences
-        y: Target sequences (errors)
+        X: Input sequences (samples, window_size, features)
+        y: Placeholder (empty array, as targets are handled separately)
+        indices: Indices corresponding to the *end* of each sequence in the original data_array
     """
-    X, y = [], []
+    X = []
+    indices = []
+    total_len = len(data_array)
     
-    # Assuming 'datetime', 'nwm_flow', 'usgs_flow', and 'error' columns in data
-    total_len = len(data)
-    
+    # Iterate up to the point where a full sequence (input window + horizon) can be formed
     for i in range(window_size, total_len - horizon + 1):
-        # Past observed flow and NWM forecast as input
-        past_obs = data['usgs_flow'].values[i-window_size:i]
-        nwm_forecast = data['nwm_flow'].values[i:i+horizon]
-        
-        # Concatenate past observations and NWM forecasts
-        input_seq = np.concatenate([past_obs, nwm_forecast])
-        
-        # Target is the error for the forecast horizon
-        target_seq = data['error'].values[i:i+horizon]
-        
+        # Input sequence is the window ending *before* the current step i
+        input_seq = data_array[i-window_size:i]
         X.append(input_seq)
-        y.append(target_seq)
+        # Store the index *at the end* of the input sequence (which corresponds to the target time step)
+        indices.append(i - 1) # Index of the last element in the input window
     
-    return np.array(X), np.array(y)
+    # Return X, an empty array for y (as it's handled outside), and the indices
+    return np.array(X), np.array([]), np.array(indices)
 
 
-def temporal_split(X: np.ndarray, y: np.ndarray, data: pd.DataFrame, 
-                  split_date: pd.Timestamp) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def temporal_split(X: np.ndarray, y: np.ndarray, sequence_timestamps: pd.DatetimeIndex, 
+                  split_date: pd.Timestamp) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Split data temporally based on a date.
+    Split data temporally based on a date using provided timestamps.
     
     Args:
         X: Input sequences
         y: Target sequences
-        data: Original DataFrame with timestamps
+        sequence_timestamps: DatetimeIndex corresponding to each sequence (usually the end time)
         split_date: Date to split on
         
     Returns:
-        X_train, y_train, X_test, y_test
+        X_train, y_train, X_test, y_test, train_indices, test_indices
     """
-    # Get timestamps for each sequence
-    timestamps = data.index[len(data) - len(X):]
-    
+    if len(X) != len(sequence_timestamps) or len(y) != len(sequence_timestamps):
+        raise ValueError("X, y, and sequence_timestamps must have the same length.")
+        
     # Create mask based on split date
-    train_mask = timestamps < split_date
-    test_mask = ~train_mask
+    train_mask = sequence_timestamps < split_date
+    test_mask = sequence_timestamps >= split_date # Use >= for test set
     
+    # Get original indices for saving
+    original_indices = np.arange(len(sequence_timestamps))
+    train_indices = original_indices[train_mask]
+    test_indices = original_indices[test_mask]
+
     # Split data
     X_train, y_train = X[train_mask], y[train_mask]
     X_test, y_test = X[test_mask], y[test_mask]
     
-    return X_train, y_train, X_test, y_test
+    return X_train, y_train, X_test, y_test, train_indices, test_indices
 
 
 def positional_encoding(seq_len: int, d_model: int) -> np.ndarray:

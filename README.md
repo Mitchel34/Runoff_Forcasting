@@ -28,18 +28,26 @@ runoff_forecasting/
 └── requirements.txt          # Project dependencies
 ```
 
-## Setup
+## Setup and Installation
 
-1. Create a Python virtual environment:
-```bash
-python -m venv env
-source env/bin/activate  # On Windows: env\Scripts\activate
-```
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository-url>
+    cd runoff_forecasting
+    ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+2.  **Create and activate a Python virtual environment:**
+    It is recommended to use Python 3.10 for compatibility with the specified dependencies (especially `tensorflow-macos`).
+    ```bash
+    python3.10 -m venv .venv
+    source .venv/bin/activate 
+    # On Windows use: .venv\Scripts\activate
+    ```
+
+3.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 ## Data Preparation
 
@@ -47,6 +55,36 @@ The project requires NWM forecast data and USGS observation data for two station
 - Station 21609641 (USGS gauge 11266500)
 - Station 20380357 (USGS gauge 09520500)
 
+## Data Preprocessing
+
+Raw NWM forecast data and USGS observation data should be placed in the `data/raw/<station_id>/` directories. The expected structure is shown in the Project Structure section.
+
+To preprocess the data for both stations (20380357 and 21609641), run the preprocessing script:
+
+```bash
+python src/preprocess.py
+```
+
+This script will:
+- Load raw NWM and USGS data.
+- Align timestamps and merge the datasets.
+- Calculate forecast error (`usgs_flow - nwm_flow`).
+- Pivot the data to have lead times (1-18h) as columns.
+- Create input sequences (24hr lookback) and corresponding target sequences (18hr forecast error).
+- Split data into training (Apr 2021 - Sep 2022) and testing (Oct 2022 - Apr 2023) sets.
+- Scale features and targets using `StandardScaler` (fitted on training data only).
+- Save the processed data (`.npz` files) and scalers (`.joblib` files) to the `data/processed/` directory.
+
+Default arguments:
+- `--data-dir`: `data/raw`
+- `--output-dir`: `data/processed`
+- `--window-size`: `24` (hours)
+- `--horizon`: `18` (hours)
+
+You can override these defaults if needed, e.g.:
+```bash
+python src/preprocess.py --window-size 48 --output-dir data/processed_ws48
+```
 
 ## Workflow
 
@@ -76,7 +114,7 @@ The models are evaluated using the following hydrological metrics:
 
 ## Authors
 
-Your Name
+Mitchel Carson & Christian Castaneda
 
 ## License
 
