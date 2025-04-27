@@ -1,5 +1,5 @@
 """
-Utility functions for data processing and evaluation metrics.
+Utility functions for the runoff forecasting project, including evaluation metrics.
 """
 import numpy as np
 import os
@@ -8,66 +8,98 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple, Union
 
 
-def correlation_coefficient(o: np.ndarray, p: np.ndarray) -> float:
-    """
-    Calculate Pearson correlation coefficient between observed and predicted values.
+def calculate_cc(observed, predicted):
+    """Calculate the Pearson Correlation Coefficient (CC)."""
+    if observed.ndim > 1: observed = observed.flatten()
+    if predicted.ndim > 1: predicted = predicted.flatten()
+    if len(observed) != len(predicted):
+        raise ValueError("Observed and predicted arrays must have the same length.")
+    if len(observed) < 2:
+        return np.nan # Not defined for less than 2 points
     
-    Args:
-        o: Observed values
-        p: Predicted values
-        
-    Returns:
-        Correlation coefficient
-    """
-    if np.std(o) == 0 or np.std(p) == 0:
-        return 0
-    return np.corrcoef(o, p)[0, 1]
-
-
-def rmse(o: np.ndarray, p: np.ndarray) -> float:
-    """
-    Calculate Root Mean Square Error.
-    
-    Args:
-        o: Observed values
-        p: Predicted values
-        
-    Returns:
-        RMSE value
-    """
-    return np.sqrt(np.mean((o - p) ** 2))
-
-
-def pbias(o: np.ndarray, p: np.ndarray) -> float:
-    """
-    Calculate Percent Bias.
-    
-    Args:
-        o: Observed values
-        p: Predicted values
-        
-    Returns:
-        PBIAS value (%)
-    """
-    if np.sum(o) == 0:
+    # Handle potential NaNs or constant series
+    if np.all(np.isnan(observed)) or np.all(np.isnan(predicted)) or \
+       np.std(observed) == 0 or np.std(predicted) == 0:
         return np.nan
-    return 100.0 * np.sum(p - o) / np.sum(o)
-
-
-def nse(o: np.ndarray, p: np.ndarray) -> float:
-    """
-    Calculate Nash-Sutcliffe Efficiency.
-    
-    Args:
-        o: Observed values
-        p: Predicted values
         
-    Returns:
-        NSE value
-    """
-    if np.std(o) == 0:
+    # Mask NaNs if any exist
+    mask = ~np.isnan(observed) & ~np.isnan(predicted)
+    if np.sum(mask) < 2:
         return np.nan
-    return 1 - np.sum((o - p) ** 2) / np.sum((o - np.mean(o)) ** 2)
+        
+    observed = observed[mask]
+    predicted = predicted[mask]
+    
+    return np.corrcoef(observed, predicted)[0, 1]
+
+
+def calculate_rmse(observed, predicted):
+    """Calculate the Root Mean Square Error (RMSE)."""
+    if observed.ndim > 1: observed = observed.flatten()
+    if predicted.ndim > 1: predicted = predicted.flatten()
+    if len(observed) != len(predicted):
+        raise ValueError("Observed and predicted arrays must have the same length.")
+        
+    # Mask NaNs
+    mask = ~np.isnan(observed) & ~np.isnan(predicted)
+    if np.sum(mask) == 0:
+        return np.nan
+        
+    observed = observed[mask]
+    predicted = predicted[mask]
+    
+    return np.sqrt(np.mean((observed - predicted)**2))
+
+
+def calculate_pbias(observed, predicted):
+    """Calculate the Percent Bias (PBIAS)."""
+    if observed.ndim > 1: observed = observed.flatten()
+    if predicted.ndim > 1: predicted = predicted.flatten()
+    if len(observed) != len(predicted):
+        raise ValueError("Observed and predicted arrays must have the same length.")
+        
+    # Mask NaNs
+    mask = ~np.isnan(observed) & ~np.isnan(predicted)
+    if np.sum(mask) == 0:
+        return np.nan
+        
+    observed = observed[mask]
+    predicted = predicted[mask]
+    
+    sum_observed = np.sum(observed)
+    if sum_observed == 0:
+        # Avoid division by zero; PBIAS is undefined or could be considered infinite/NaN
+        # depending on context. Returning NaN is safer.
+        return np.nan 
+        
+    return 100 * np.sum(predicted - observed) / sum_observed
+
+
+def calculate_nse(observed, predicted):
+    """Calculate the Nash-Sutcliffe Efficiency (NSE)."""
+    if observed.ndim > 1: observed = observed.flatten()
+    if predicted.ndim > 1: predicted = predicted.flatten()
+    if len(observed) != len(predicted):
+        raise ValueError("Observed and predicted arrays must have the same length.")
+        
+    # Mask NaNs
+    mask = ~np.isnan(observed) & ~np.isnan(predicted)
+    if np.sum(mask) == 0:
+        return np.nan
+        
+    observed = observed[mask]
+    predicted = predicted[mask]
+    
+    mean_observed = np.mean(observed)
+    numerator = np.sum((observed - predicted)**2)
+    denominator = np.sum((observed - mean_observed)**2)
+    
+    if denominator == 0:
+        # Avoid division by zero. If observed is constant, NSE is undefined.
+        # Can return -inf or NaN. Let's use NaN.
+        return np.nan 
+        
+    return 1 - (numerator / denominator)
 
 
 def calculate_metrics_over_windows(observed: np.ndarray, predicted: np.ndarray, 
@@ -99,14 +131,14 @@ def calculate_metrics_over_windows(observed: np.ndarray, predicted: np.ndarray,
         if np.std(o) == 0:
             continue
         
-        metrics['CC'].append(correlation_coefficient(o, p))
-        metrics['RMSE'].append(rmse(o, p))
+        metrics['CC'].append(calculate_cc(o, p))
+        metrics['RMSE'].append(calculate_rmse(o, p))
         
-        pbias_val = pbias(o, p)
+        pbias_val = calculate_pbias(o, p)
         if not np.isnan(pbias_val):
             metrics['PBIAS'].append(pbias_val)
         
-        nse_val = nse(o, p)
+        nse_val = calculate_nse(o, p)
         if not np.isnan(nse_val):
             metrics['NSE'].append(nse_val)
     

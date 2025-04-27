@@ -1,294 +1,222 @@
 """
-Evaluate trained models and generate visualizations.
+Evaluate the trained model (LSTM or Transformer) on the test set.
+
+Loads the best model, test data, and scalers.
+Makes predictions, inverse-transforms results, calculates corrected runoff.
+Computes evaluation metrics (CC, RMSE, PBIAS, NSE) for each lead time.
+Generates box plots comparing NWM, Corrected NWM, and Observed USGS runoff.
+Generates box plots comparing metrics for NWM vs. Corrected NWM.
+Saves metrics and plots.
 """
+
+import argparse
 import os
-import sys
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from joblib import load as joblib_load
 import matplotlib.pyplot as plt
 import seaborn as sns
-import argparse
-from pathlib import Path
 
-# Add project root to path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if project_root not in sys.path:
-    sys.path.append(project_root)
+# Import utility functions and metrics
+from utils import calculate_cc, calculate_rmse, calculate_pbias, calculate_nse
 
-from src.utils import correlation_coefficient, rmse, pbias, nse, calculate_metrics_over_windows
+# Define paths (adjust if your structure differs)
+PROCESSED_DATA_DIR = os.path.join('..', 'data', 'processed')
+MODELS_DIR = os.path.join('..', 'models')
+RESULTS_DIR = os.path.join('..', 'results')
+PLOTS_DIR = os.path.join(RESULTS_DIR, 'plots')
+METRICS_DIR = os.path.join(RESULTS_DIR, 'metrics')
+SCALERS_DIR = os.path.join(PROCESSED_DATA_DIR, 'scalers')
 
+def load_test_data_and_metadata(station_id):
+    """Loads test data (X, y) and original NWM/USGS values."""
+    file_path = os.path.join(PROCESSED_DATA_DIR, 'test', f"{station_id}.npz")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Processed test data file not found: {file_path}")
+    
+    data = np.load(file_path)
+    print(f"Loaded test data for station {station_id} from {file_path}")
+    
+    # Essential data: X_test, y_test (scaled errors)
+    X_test = data['X']
+    y_test_scaled = data['y'] # These are the scaled true errors
+    
+    # Metadata needed for evaluation: Original NWM forecasts and USGS observations
+    # These should correspond to the time steps represented by y_test
+    if 'nwm_test' not in data or 'usgs_test' not in data:
+        raise KeyError("Test data file must contain 'nwm_test' and 'usgs_test' arrays.")
+        
+    nwm_test_original = data['nwm_test'] # Shape: (n_samples, n_lead_times)
+    usgs_test_original = data['usgs_test'] # Shape: (n_samples, n_lead_times)
+    
+    print(f"  X_test shape: {X_test.shape}")
+    print(f"  y_test_scaled shape: {y_test_scaled.shape}")
+    print(f"  nwm_test_original shape: {nwm_test_original.shape}")
+    print(f"  usgs_test_original shape: {usgs_test_original.shape}")
 
-def extract_true_values(X_test, y_test):
-    """
-    Extract true observed values, NWM forecasts, and errors from test data.
-    
-    Args:
-        X_test: Input test sequences
-        y_test: Target error sequences
+    # Ensure shapes are consistent (samples and lead times)
+    if y_test_scaled.shape != nwm_test_original.shape or y_test_scaled.shape != usgs_test_original.shape:
+        raise ValueError("Shape mismatch between scaled errors (y_test), nwm_test, and usgs_test.")
         
-    Returns:
-        observed_flow: True observed flow values
-        nwm_forecasts: NWM forecasted flow values
-        true_errors: True error values between NWM and observed
-    """
-    # Extract NWM forecasts (last 18 elements of each sequence)
-    # X shape is (samples, 42, 1) where 42 = window_size (24) + horizon (18)
-    nwm_forecasts = X_test[:, -y_test.shape[1]:, 0]
-    
-    # True errors are directly in y_test
-    true_errors = y_test
-    
-    # Observed flow = NWM forecast + true error
-    observed_flow = nwm_forecasts + true_errors
-    
-    return observed_flow, nwm_forecasts, true_errors
+    return X_test, y_test_scaled, nwm_test_original, usgs_test_original
 
+def load_scaler(station_id, scaler_type='y'):
+    """Loads the y-scaler for inverse transformation."""
+    scaler_filename = f"{station_id}_{scaler_type.lower()}_scaler.joblib"
+    scaler_path = os.path.join(SCALERS_DIR, scaler_filename)
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError(f"Scaler file not found: {scaler_path}. Cannot inverse transform.")
+    scaler = joblib_load(scaler_path)
+    print(f"Loaded {scaler_type} scaler for station {station_id} from {scaler_path}")
+    return scaler
 
-def create_metric_box_plots(observed, nwm_forecasts, corrected_forecasts, station_id, output_dir):
-    """
-    Generate box plots for evaluation metrics (CC, RMSE, PBIAS, NSE).
+def evaluate_model(station_id, model_type):
+    """Evaluates the trained model and generates results."""
+    print(f"\n--- Starting Evaluation for Station {station_id} ({model_type.upper()}) ---")
     
-    Args:
-        observed: Observed flow values
-        nwm_forecasts: Raw NWM forecasts
-        corrected_forecasts: Corrected forecasts from model
-        station_id: Station identifier
-        output_dir: Directory to save plots
-    """
-    # Initialize metric arrays
-    lead_times = list(range(1, 19))  # 1-18 hours
-    metrics = {
-        'CC': {'raw': [], 'corr': []},
-        'RMSE': {'raw': [], 'corr': []},
-        'PBIAS': {'raw': [], 'corr': []},
-        'NSE': {'raw': [], 'corr': []}
-    }
+    # Create results directories
+    os.makedirs(PLOTS_DIR, exist_ok=True)
+    os.makedirs(METRICS_DIR, exist_ok=True)
     
-    # Calculate metrics for each lead time
-    for i, lead_time in enumerate(lead_times):
-        # Extract data for this lead time
-        obs = observed[:, i]
-        nwm = nwm_forecasts[:, i]
-        corr = corrected_forecasts[:, i]
-        
-        # Calculate metrics over sliding windows
-        window_size = min(30, len(obs) // 10)  # Use at least 10 windows
-        
-        raw_metrics = calculate_metrics_over_windows(obs, nwm, window_size)
-        corr_metrics = calculate_metrics_over_windows(obs, corr, window_size)
-        
-        # Store all window metrics for box plots
-        for metric_name in metrics:
-            metrics[metric_name]['raw'].append(raw_metrics[metric_name])
-            metrics[metric_name]['corr'].append(corr_metrics[metric_name])
-    
-    # Create metrics table
-    metrics_df = pd.DataFrame(index=lead_times)
-    metrics_df.index.name = 'lead_time'
-    
-    for metric_name in metrics:
-        for i, lead_time in enumerate(lead_times):
-            # Calculate mean of the windows for the table
-            metrics_df.loc[lead_time, f'{metric_name}_raw'] = np.mean(metrics[metric_name]['raw'][i])
-            metrics_df.loc[lead_time, f'{metric_name}_corr'] = np.mean(metrics[metric_name]['corr'][i])
-    
-    # Save metrics to CSV
-    metrics_dir = os.path.join(project_root, 'results', 'metrics')
-    os.makedirs(metrics_dir, exist_ok=True)
-    metrics_df.to_csv(os.path.join(metrics_dir, f'{station_id}_metrics.csv'))
-    
-    # Create box plots for each metric
-    for metric_name in metrics:
-        plt.figure(figsize=(15, 8))
-        
-        # Prepare data for box plots
-        raw_data = [metrics[metric_name]['raw'][i] for i in range(len(lead_times))]
-        corr_data = [metrics[metric_name]['corr'][i] for i in range(len(lead_times))]
-        
-        # Box plot positions
-        positions = []
-        for i in range(len(lead_times)):
-            positions.extend([i*3, i*3+1])
-        
-        # Create box plots
-        bplot = plt.boxplot(
-            raw_data + corr_data,
-            positions=positions,
-            patch_artist=True,
-            widths=0.6
-        )
-        
-        # Set box colors
-        for i, box in enumerate(bplot['boxes']):
-            if i < len(lead_times):
-                box.set_facecolor('lightblue')  # Raw NWM
-            else:
-                box.set_facecolor('lightgreen')  # Corrected
-        
-        # Set x-ticks at the center of each lead time group
-        plt.xticks([i*3+0.5 for i in range(len(lead_times))], lead_times)
-        plt.xlabel('Lead Time (hours)')
-        plt.ylabel(metric_name)
-        plt.title(f'Station {station_id}: {metric_name} by Lead Time')
-        
-        # Add legend
-        plt.legend(
-            [bplot['boxes'][0], bplot['boxes'][len(lead_times)]],
-            ['Raw NWM', 'Corrected'],
-            loc='best'
-        )
-        
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        
-        # Save the plot
-        plt.savefig(os.path.join(output_dir, f'{station_id}_{metric_name}_boxplot.png'))
-        plt.close()
-    
-    print(f"Generated metric box plots for station {station_id}")
-
-
-def generate_runoff_box_plots(observed, nwm_forecasts, corrected_forecasts, station_id, output_dir):
-    """
-    Generate box plots of observed, NWM, and corrected runoff for each lead time.
-    
-    Args:
-        observed: Observed flow values
-        nwm_forecasts: Raw NWM forecasts
-        corrected_forecasts: Corrected forecasts from model
-        station_id: Station identifier
-        output_dir: Directory to save plots
-    """
-    lead_times = list(range(1, 19))  # 1-18 hours
-    
-    plt.figure(figsize=(20, 12))
-    
-    # Prepare data for box plots
-    data_to_plot = []
-    for i in range(len(lead_times)):
-        data_to_plot.extend([
-            observed[:, i],
-            nwm_forecasts[:, i],
-            corrected_forecasts[:, i]
-        ])
-    
-    # Box plot positions
-    positions = []
-    for i in range(len(lead_times)):
-        positions.extend([i*4, i*4+1, i*4+2])
-    
-    # Create box plots
-    bplot = plt.boxplot(
-        data_to_plot,
-        positions=positions,
-        patch_artist=True,
-        widths=0.6
-    )
-    
-    # Set box colors
-    for i, box in enumerate(bplot['boxes']):
-        if i % 3 == 0:
-            box.set_facecolor('lightblue')  # Observed
-        elif i % 3 == 1:
-            box.set_facecolor('lightcoral')  # Raw NWM
-        else:
-            box.set_facecolor('lightgreen')  # Corrected
-    
-    # Set x-ticks at the center of each lead time group
-    plt.xticks([i*4+1 for i in range(len(lead_times))], lead_times)
-    plt.xlabel('Lead Time (hours)')
-    plt.ylabel('Runoff (cms)')
-    plt.title(f'Station {station_id}: Runoff Distribution by Lead Time')
-    
-    # Add legend
-    plt.legend(
-        [bplot['boxes'][0], bplot['boxes'][1], bplot['boxes'][2]],
-        ['Observed (USGS)', 'Raw NWM', 'Corrected'],
-        loc='best'
-    )
-    
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    
-    # Save the plot
-    plt.savefig(os.path.join(output_dir, f'{station_id}_runoff_boxplot.png'))
-    plt.close()
-    
-    print(f"Generated runoff box plot for station {station_id}")
-
-
-def evaluate_station(station_id, data_dir, models_dir, output_dir):
-    """
-    Evaluate model for a specific station.
-    
-    Args:
-        station_id: Station identifier
-        data_dir: Directory with processed test data
-        models_dir: Directory with trained models
-        output_dir: Directory to save evaluation results
-    """
-    print(f"Evaluating model for station {station_id}...")
-    
-    # Load test data
-    test_file = os.path.join(data_dir, 'test', f"{station_id}.npz")
-    if not os.path.exists(test_file):
-        print(f"Test data file not found: {test_file}")
-        return False
-    
-    test_data = np.load(test_file)
-    X_test, y_test = test_data['X'], test_data['y']
-    
-    # Load trained model
-    model_path = os.path.join(models_dir, f"{station_id}.h5")
+    # 1. Load Model
+    model_filename = f"{station_id}_{model_type.lower()}_best.keras"
+    model_path = os.path.join(MODELS_DIR, model_filename)
     if not os.path.exists(model_path):
-        print(f"Model file not found: {model_path}")
-        return False
-    
+        raise FileNotFoundError(f"Trained model not found: {model_path}")
     model = tf.keras.models.load_model(model_path)
+    print(f"Loaded model from {model_path}")
     
-    # Make predictions
-    predicted_errors = model.predict(X_test)
+    # 2. Load Test Data and Scaler
+    X_test, y_test_scaled, nwm_test_original, usgs_test_original = load_test_data_and_metadata(station_id)
+    y_scaler = load_scaler(station_id, 'y')
     
-    # Extract true values
-    observed_flow, nwm_forecasts, true_errors = extract_true_values(X_test, y_test)
+    # 3. Make Predictions (Scaled Errors)
+    print("Making predictions on the test set...")
+    predicted_errors_scaled = model.predict(X_test)
+    print(f"Predicted errors (scaled) shape: {predicted_errors_scaled.shape}")
     
-    # Compute corrected forecasts
-    corrected_forecasts = nwm_forecasts + predicted_errors
+    # 4. Inverse Transform Predictions and True Errors
+    print("Inverse transforming predictions and true errors...")
+    # Reshape if scaler expects 2D input (n_samples * n_features, 1) -> (n_samples, n_features)
+    n_samples = predicted_errors_scaled.shape[0]
+    n_lead_times = predicted_errors_scaled.shape[1]
     
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
+    predicted_errors_unscaled = y_scaler.inverse_transform(predicted_errors_scaled.reshape(-1, n_lead_times))
+    true_errors_unscaled = y_scaler.inverse_transform(y_test_scaled.reshape(-1, n_lead_times))
     
-    # Generate metric box plots
-    create_metric_box_plots(observed_flow, nwm_forecasts, corrected_forecasts, station_id, output_dir)
-    
-    # Generate runoff box plots
-    generate_runoff_box_plots(observed_flow, nwm_forecasts, corrected_forecasts, station_id, output_dir)
-    
-    print(f"Evaluated station {station_id}. Metrics saved to results/metrics/{station_id}_metrics.csv. Plots saved to {output_dir}")
-    return True
+    # Reshape back if needed, although likely already (n_samples, n_lead_times)
+    # predicted_errors_unscaled = predicted_errors_unscaled.reshape(n_samples, n_lead_times)
+    # true_errors_unscaled = true_errors_unscaled.reshape(n_samples, n_lead_times)
+    print(f"Predicted errors (unscaled) shape: {predicted_errors_unscaled.shape}")
+    print(f"True errors (unscaled) shape: {true_errors_unscaled.shape}")
 
+    # Verify true errors calculation (optional but recommended)
+    # calculated_true_errors = nwm_test_original - usgs_test_original
+    # error_diff = np.abs(true_errors_unscaled - calculated_true_errors)
+    # print(f"Max difference between loaded true errors and calculated: {np.max(error_diff)}")
+    # assert np.allclose(true_errors_unscaled, calculated_true_errors, atol=1e-5), "Mismatch in true error calculation!"
 
-def main():
-    parser = argparse.ArgumentParser(description="Evaluate trained models")
-    parser.add_argument("--station", type=str, required=False,
-                        help="Station ID to evaluate (if not specified, evaluates both stations)")
-    parser.add_argument("--data-dir", type=str, default="data/processed",
-                        help="Directory with processed test data")
-    parser.add_argument("--models-dir", type=str, default="models",
-                        help="Directory with trained models")
-    parser.add_argument("--output-dir", type=str, default="results/plots",
-                        help="Directory to save evaluation results")
-    args = parser.parse_args()
+    # 5. Calculate Corrected NWM Forecasts
+    # Corrected = NWM - Predicted_Error (since error = NWM - USGS)
+    corrected_nwm_forecasts = nwm_test_original - predicted_errors_unscaled
+    print(f"Corrected NWM forecasts shape: {corrected_nwm_forecasts.shape}")
+
+    # 6. Calculate Metrics for each Lead Time
+    print("Calculating evaluation metrics per lead time...")
+    metrics = {'lead_time': list(range(1, n_lead_times + 1))}
+    metric_funcs = {'CC': calculate_cc, 'RMSE': calculate_rmse, 'PBIAS': calculate_pbias, 'NSE': calculate_nse}
     
-    if args.station:
-        # Evaluate model for specified station
-        evaluate_station(args.station, args.data_dir, args.models_dir, args.output_dir)
-    else:
-        # Evaluate models for both stations
-        for station_id in ["21609641", "20380357"]:
-            evaluate_station(station_id, args.data_dir, args.models_dir, args.output_dir)
+    for metric_name, func in metric_funcs.items():
+        metrics[f'NWM_{metric_name}'] = []
+        metrics[f'Corrected_{metric_name}'] = []
+        for i in range(n_lead_times):
+            obs = usgs_test_original[:, i]
+            nwm_pred = nwm_test_original[:, i]
+            corrected_pred = corrected_nwm_forecasts[:, i]
+            
+            metrics[f'NWM_{metric_name}'].append(func(obs, nwm_pred))
+            metrics[f'Corrected_{metric_name}'].append(func(obs, corrected_pred))
+            
+    metrics_df = pd.DataFrame(metrics)
+    metrics_filename = os.path.join(METRICS_DIR, f"{station_id}_{model_type.lower()}_evaluation_metrics.csv")
+    metrics_df.to_csv(metrics_filename, index=False)
+    print(f"Saved evaluation metrics to {metrics_filename}")
+    print(metrics_df.head())
 
+    # 7. Generate Visualizations
+    print("Generating visualizations...")
+    lead_times = list(range(1, n_lead_times + 1))
+
+    # --- Box Plot 1: Runoff Comparison --- 
+    plt.figure(figsize=(15, 8))
+    plot_data = []
+    for i in range(n_lead_times):
+        plot_data.append(pd.DataFrame({
+            'Runoff': usgs_test_original[:, i], 
+            'Lead Time': lead_times[i], 
+            'Type': 'Observed (USGS)'
+        }))
+        plot_data.append(pd.DataFrame({
+            'Runoff': nwm_test_original[:, i], 
+            'Lead Time': lead_times[i], 
+            'Type': 'NWM Forecast'
+        }))
+        plot_data.append(pd.DataFrame({
+            'Runoff': corrected_nwm_forecasts[:, i], 
+            'Lead Time': lead_times[i], 
+            'Type': f'Corrected ({model_type.upper()})'
+        }))
+    plot_df = pd.concat(plot_data)
+    
+    sns.boxplot(data=plot_df, x='Lead Time', y='Runoff', hue='Type', showfliers=False) # Hide outliers for clarity
+    plt.title(f'Runoff Comparison by Lead Time - Station {station_id}')
+    plt.xlabel('Lead Time (Hours)')
+    plt.ylabel('Runoff (cms)') # Assuming units are cms, adjust if needed
+    plt.xticks(rotation=45)
+    plt.legend(title='Forecast Type')
+    plt.tight_layout()
+    plot_filename = os.path.join(PLOTS_DIR, f"{station_id}_{model_type.lower()}_runoff_boxplot.png")
+    plt.savefig(plot_filename)
+    print(f"Saved runoff comparison plot to {plot_filename}")
+    plt.close()
+
+    # --- Box Plot 2: Metrics Comparison --- 
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12), sharex=True)
+    axes = axes.flatten()
+    metric_plot_names = ['CC', 'RMSE', 'PBIAS', 'NSE']
+    
+    for i, metric_name in enumerate(metric_plot_names):
+        melted_df = pd.melt(metrics_df, 
+                            id_vars=['lead_time'], 
+                            value_vars=[f'NWM_{metric_name}', f'Corrected_{metric_name}'],
+                            var_name='Metric Type', 
+                            value_name=metric_name)
+        melted_df['Metric Type'] = melted_df['Metric Type'].str.replace(f'_{metric_name}', '')
+        
+        sns.boxplot(data=melted_df, x='lead_time', y=metric_name, hue='Metric Type', ax=axes[i], showfliers=False)
+        axes[i].set_title(f'{metric_name} Comparison')
+        axes[i].set_xlabel('Lead Time (Hours)')
+        axes[i].set_ylabel(metric_name)
+        axes[i].legend(title='Forecast Type')
+        axes[i].tick_params(axis='x', rotation=45)
+
+    plt.suptitle(f'Evaluation Metrics Comparison by Lead Time - Station {station_id} ({model_type.upper()})', y=1.02)
+    plt.tight_layout()
+    plot_filename = os.path.join(PLOTS_DIR, f"{station_id}_{model_type.lower()}_metrics_boxplot.png")
+    plt.savefig(plot_filename)
+    print(f"Saved metrics comparison plot to {plot_filename}")
+    plt.close()
+
+    print(f"--- Evaluation Complete for Station {station_id} ({model_type.upper()}) ---")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Evaluate trained model for runoff error correction.")
+    parser.add_argument("--station_id", type=str, required=True, help="USGS Station ID (e.g., 21609641)")
+    parser.add_argument("--model_type", type=str, required=True, choices=['lstm', 'transformer'], help="Model type that was trained")
+    
+    args = parser.parse_args()
+    
+    evaluate_model(station_id=args.station_id, model_type=args.model_type)
+    
+    print("\nEvaluation script finished.")
