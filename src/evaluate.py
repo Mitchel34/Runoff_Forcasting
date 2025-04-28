@@ -285,7 +285,7 @@ def evaluate_model(station_id, model_type):
         sns.boxplot(data=plot_df, x='Lead Time', y='Runoff', hue='Type', showfliers=False)
         plt.title(f'Runoff Comparison by Lead Time - Station {station_id}')
         plt.xlabel('Lead Time (Hours)')
-        plt.ylabel('Runoff (cms)')
+        plt.ylabel('Runoff (cfs)') # Updated unit label
         plt.xticks(rotation=45)
         plt.legend(title='Forecast Type', bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout(rect=[0, 0, 0.85, 1])
