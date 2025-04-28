@@ -19,10 +19,11 @@ The preprocessing pipeline, implemented in `src/preprocess.py`, performed the fo
 4.  **USGS Data Handling:**
     *   The USGS data was loaded, parsing the `DateTime` column.
     *   The script identified the correct flow column (`USGSFlowValue` based on inspection during development).
-    *   Unit conversion was applied to the USGS flow data, converting from cubic feet per second (cfs) to cubic meters per second (cms) by multiplying by 0.0283168, assuming the raw USGS data was in cfs. The identified flow column was renamed to `usgs_flow`.
+    *   **No unit conversion is applied.** The project assumes all flow data (NWM and USGS) is in **cubic feet per second (cfs)** and maintains this unit throughout. The identified flow column was renamed to `usgs_flow`.
+    *   The USGS data was resampled to an hourly frequency using the mean (`.resample('H').mean()`) and missing values were filled using linear interpolation (`.interpolate(method='linear')`) followed by backfill/forward fill.
     *   The USGS `DateTime` column was made timezone-naive (`tz_localize(None)`) to ensure compatibility with the NWM `valid_time` during merging.
 5.  **Data Alignment and Merging:** The processed NWM and USGS DataFrames were merged based on the timestamp (`valid_time` from NWM matching `datetime` from USGS) using an inner join.
-6.  **Error Calculation:** The forecast error, the primary target variable for the deep learning models, was calculated as `error = usgs_flow - nwm_flow`.
+6.  **Error Calculation:** The forecast error, the primary target variable for the deep learning models, was calculated as `error = usgs_flow - nwm_flow` (in cfs).
 7.  **Data Pivoting:** The merged data, initially in a long format (one row per lead time per timestamp), was pivoted. The resulting DataFrame has a DateTime index, with columns representing `nwm_flow`, `usgs_flow`, and `error` for each of the 18 lead times (e.g., `nwm_flow_1`, `error_1`, `nwm_flow_2`, `error_2`, ..., `error_18`). Rows containing any NaN values after pivoting (indicating missing data for at least one lead time at that timestamp) were dropped.
 8.  **Feature and Target Selection:**
     *   **Features (X):** Columns representing NWM flow and error for all 18 lead times (`nwm_flow_1` to `nwm_flow_18` and `error_1` to `error_18`) were selected as input features.
