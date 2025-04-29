@@ -219,7 +219,7 @@ Raw NWM forecast data and USGS observation data should be placed in the `data/ra
 To preprocess the data for both stations (20380357 and 21609641), run the preprocessing script:
 
 ```bash
-python src/preprocess.py
+python3 src/preprocess.py
 ```
 
 This script will:

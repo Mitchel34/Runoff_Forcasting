@@ -16,12 +16,32 @@ from sklearn.model_selection import train_test_split # For creating validation s
 # Import model building functions and data loading
 from models.lstm import build_lstm_model
 from models.transformer import build_transformer_model
-from train import load_data # Reuse data loading function from train.py
+# We'll use our own load_data function to handle key name mismatch
 
-# Define paths
-PROCESSED_DATA_DIR = os.path.join('..', 'data', 'processed')
-TUNER_LOG_DIR = os.path.join('..', 'tuner_logs') # Directory to store tuning results
-HYPERPARAMS_SAVE_DIR = os.path.join('..', 'results', 'hyperparameters') # Directory to save best HPs
+# Define paths - Use absolute paths for reliability
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..')) # Assumes script is in src/
+PROCESSED_DATA_DIR = os.path.join(PROJECT_ROOT, 'data', 'processed')
+TUNER_LOG_DIR = os.path.join(PROJECT_ROOT, 'tuner_logs') # Directory to store tuning results
+HYPERPARAMS_SAVE_DIR = os.path.join(PROJECT_ROOT, 'results', 'hyperparameters') # Directory to save best HPs
+
+def load_data(station_id, data_type='train'):
+    """Loads preprocessed data for a given station and type (train/test)."""
+    file_path = os.path.join(PROCESSED_DATA_DIR, data_type, f"{station_id}.npz")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Processed data file not found: {file_path}")
+    data = np.load(file_path)
+    print(f"Loaded {data_type} data for station {station_id} from {file_path}")
+    
+    # Handle different key naming conventions
+    x_key = 'X_train' if data_type == 'train' else 'X_test'
+    y_key = 'y_train_scaled' if data_type == 'train' else 'y_test_scaled'
+    
+    if x_key not in data or y_key not in data:
+        print(f"Warning: Expected keys not found in {file_path}. Available keys: {list(data.keys())}")
+    
+    print(f"  X shape: {data[x_key].shape}, y shape: {data[y_key].shape}")
+    return data[x_key], data[y_key]
 
 class LSTMHyperModel(kt.HyperModel):
     """Keras Tuner HyperModel for LSTM."""

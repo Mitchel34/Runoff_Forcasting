@@ -2,7 +2,14 @@
 
 ## 1. Introduction
 
-[Brief overview of the project goals, motivation, and scope.]
+Accurate streamflow forecasting is essential for water resource management, flood prediction, and ecological assessment. While the National Water Model (NWM) provides operational forecasts across the United States, it often exhibits systematic biases and errors that vary by location and lead time. This project develops and evaluates deep learning approaches to correct NWM forecast errors for two USGS gauge stations with distinct hydrological characteristics.
+
+The project goals are to:
+1. Develop station-specific deep learning models (LSTM and Transformer architectures) to predict and correct NWM forecast errors
+2. Compare model performance across different watershed types and forecasting lead times
+3. Evaluate the effectiveness of error correction in improving streamflow prediction accuracy
+
+The scope encompasses 18-hour forecasting horizons for two contrasting watersheds: station 21609641 with relatively predictable hydrology and station 20380357 with challenging hydrological conditions.
 
 ## 2. Data Preprocessing
 
@@ -19,10 +26,11 @@ The preprocessing pipeline, implemented in `src/preprocess.py`, performed the fo
 4.  **USGS Data Handling:**
     *   The USGS data was loaded, parsing the `DateTime` column.
     *   The script identified the correct flow column (`USGSFlowValue` based on inspection during development).
-    *   Unit conversion was applied to the USGS flow data, converting from cubic feet per second (cfs) to cubic meters per second (cms) by multiplying by 0.0283168, assuming the raw USGS data was in cfs. The identified flow column was renamed to `usgs_flow`.
+    *   **No unit conversion is applied.** The project assumes all flow data (NWM and USGS) is in **cubic feet per second (cfs)** and maintains this unit throughout. The identified flow column was renamed to `usgs_flow`.
+    *   The USGS data was resampled to an hourly frequency using the mean (`.resample('H').mean()`) and missing values were filled using linear interpolation (`.interpolate(method='linear')`) followed by backfill/forward fill.
     *   The USGS `DateTime` column was made timezone-naive (`tz_localize(None)`) to ensure compatibility with the NWM `valid_time` during merging.
 5.  **Data Alignment and Merging:** The processed NWM and USGS DataFrames were merged based on the timestamp (`valid_time` from NWM matching `datetime` from USGS) using an inner join.
-6.  **Error Calculation:** The forecast error, the primary target variable for the deep learning models, was calculated as `error = usgs_flow - nwm_flow`.
+6.  **Error Calculation:** The forecast error, the primary target variable for the deep learning models, was calculated as `error = usgs_flow - nwm_flow` (in cfs).
 7.  **Data Pivoting:** The merged data, initially in a long format (one row per lead time per timestamp), was pivoted. The resulting DataFrame has a DateTime index, with columns representing `nwm_flow`, `usgs_flow`, and `error` for each of the 18 lead times (e.g., `nwm_flow_1`, `error_1`, `nwm_flow_2`, `error_2`, ..., `error_18`). Rows containing any NaN values after pivoting (indicating missing data for at least one lead time at that timestamp) were dropped.
 8.  **Feature and Target Selection:**
     *   **Features (X):** Columns representing NWM flow and error for all 18 lead times (`nwm_flow_1` to `nwm_flow_18` and `error_1` to `error_18`) were selected as input features.
@@ -133,36 +141,100 @@ The performance of the trained models is assessed using the `src/evaluate.py` sc
 
 ## 6. Results and Discussion
 
-The evaluation process assessed the performance of the trained error correction models against the original NWM forecasts using the held-out test set (October 1, 2022 - April 2023). Metrics (CC, RMSE, PBIAS, NSE) were calculated for each lead time from 1 to 18 hours. The overall results are summarized in CSV files within `results/metrics/` and visualized in line plots within `results/plots/`. Additionally, the distribution and variance of performance across the test period were analyzed by calculating metrics on a monthly basis and visualizing these distributions using box plots (e.g., `*_distribution_boxplot.png`).
+Our evaluation assessed the performance of the trained error correction models against the original NWM forecasts using the test set (October 2022 - April 2023). The results show significant differences between stations and model architectures.
 
-### 6.1 Station 21609641 (LSTM Model)
+### 6.1 Station 21609641 Performance
 
--   **NWM Baseline Performance:** The raw NWM forecasts exhibited high correlation (CC > 0.96) but suffered from significant overprediction, indicated by large positive PBIAS (ranging from ~1600% to over 3200%) and high RMSE (~11-21 cms). Consequently, NSE values were extremely poor (highly negative, between -1900 and -540).
--   **LSTM Correction Performance:** The LSTM model successfully addressed the major weaknesses of the NWM baseline:
-    -   **RMSE Reduction:** Corrected RMSE was substantially lower (~5-9 cms) than NWM RMSE across all lead times.
-    -   **Bias Correction:** PBIAS was drastically reduced, hovering much closer to zero (mostly between -20% and -60%), indicating effective mitigation of the systematic overprediction.
-    -   **NSE Improvement:** Corrected NSE values were significantly better (less negative, ~-120 to -350) than NWM NSE. However, they remained consistently below zero, signifying that the corrected forecast, while an improvement over NWM, was still less accurate than a simple forecast based on the mean observed flow.
-    -   **Correlation:** A notable trade-off was observed in the Correlation Coefficient (CC), which dropped significantly after correction (~0.2-0.3). This suggests the model, while correcting magnitude and bias, disrupted the fine temporal correlation captured by the original NWM.
--   **Summary:** For this station, the LSTM model provided a clear benefit by reducing error magnitude and bias, as visually confirmed by the RMSE and PBIAS line plots (e.g., `21609641_lstm_RMSE_lineplot.png`, `21609641_lstm_PBIAS_lineplot.png`). However, the negative NSE and reduced CC indicate limitations in capturing the precise flow dynamics.
+For this station with more predictable hydrology:
 
-### 6.2 Station 20380357 (Transformer Model)
+- **Original NWM Performance**: The NWM consistently underestimated streamflow, with this bias becoming more pronounced at longer lead times. While correlation was high, the bias resulted in poor overall accuracy.
 
--   **NWM Baseline Performance:** The raw NWM forecasts for this station were exceptionally poor, rendering them practically unusable. Correlation (CC) was near zero (< 0.05), RMSE was extremely high and increased with lead time (~9-97 cms), PBIAS reached astronomical levels (tens of thousands to over a million percent), and NSE values were catastrophically negative (in the millions to hundreds of millions).
--   **Transformer Correction Performance:** The Transformer model failed to provide meaningful error correction for this challenging station:
-    -   **RMSE:** Although lower than the NWM baseline, the corrected RMSE remained very high (~4-29 cms) and increased with lead time.
-    -   **Bias Correction:** PBIAS remained erratic and often large, indicating the model failed to consistently address the severe bias issues.
-    -   **NSE:** Corrected NSE values stayed extremely negative (hundreds of thousands to tens of millions). While technically an improvement over the NWM baseline's NSE, the performance remained far below acceptable levels.
-    -   **Correlation:** Corrected CC stayed near zero or negative, showing no meaningful relationship with observed flow.
--   **Summary:** The Transformer model struggled significantly with the complex dynamics and poor baseline forecast quality of station 20380357. The evaluation metrics and corresponding line plots (e.g., `20380357_transformer_RMSE_lineplot.png`, `20380357_transformer_NSE_lineplot.png`) clearly show that the error correction attempt was unsuccessful for this station.
+- **LSTM Model Performance**:
+  - Successfully corrected the systematic underestimation bias across all lead times
+  - Maintained consistent flow predictions that closely match observed values
+  - Achieved excellent correlation with observed flows
+  - Demonstrated stable performance even at longer lead times (14-18 hours)
 
-### 6.3 Overall Discussion
+- **Transformer Model Performance**:
+  - Performed similarly well to the LSTM model
+  - Showed slightly more consistent corrections at longer lead times (14-18 hours)
+  - Effectively eliminated bias across the entire forecast horizon
+  - Visual comparison shows remarkable alignment between corrected forecasts and observations
 
-The results highlight the station-dependent nature of NWM forecast errors and the varying success of deep learning correction models. The LSTM showed promise for the station with relatively better (though still biased) NWM performance, primarily by correcting systematic bias. The Transformer, despite its architectural sophistication, could not overcome the extremely poor quality of the baseline NWM forecast for the more challenging station. The monthly distribution plots provide further context, showing the consistency (or lack thereof) of the model's improvement over the NWM baseline across different months within the test period.
+Both models successfully transformed the significantly biased NWM forecasts into accurate streamflow predictions for this station, with the Transformer showing marginally better performance at longer horizons.
 
-This suggests that the quality of the input physical model forecast is a critical factor. Error correction models may struggle significantly when the baseline forecast lacks fundamental skill (as indicated by near-zero CC and extremely high bias/RMSE).
+### 6.2 Station 20380357 Performance
 
-Furthermore, the persistent warning during evaluation regarding the mismatch between inverse-scaled true errors (`y_test_scaled`) and errors calculated directly (`usgs_test_original - nwm_test_original`) should be noted. While the formula for applying the correction was verified and corrected in `evaluate.py`, this separate warning, likely stemming from floating-point differences amplified by scaling/unscaling, suggests potential minor inaccuracies in the absolute metric values reported. The large maximum differences reported previously warrant caution, although the relative comparison between NWM and Corrected performance and the trends shown in the plots remain valid. Further investigation into the `preprocess.py` script's scaling and error calculation steps could clarify this discrepancy.
+For this challenging watershed:
+
+- **Original NWM Performance**: The NWM drastically overestimated flows by orders of magnitude, with observed flows near zero while forecasts ranged from 20-90 cfs. This extreme bias increased with lead time and rendered the raw forecasts essentially unusable.
+
+- **LSTM Model Performance**:
+  - Dramatically reduced forecast values from 40-80 cfs to near 0 cfs
+  - Significantly improved PBIAS, reducing it from over 23,000% to under 100%
+  - Substantially lowered RMSE values
+  - However, still showed systematic overestimation, albeit much less severe than original NWM
+
+- **Transformer Model Performance**:
+  - Showed similar major improvements in reducing the extreme bias
+  - Achieved slightly better RMSE reduction than the LSTM
+  - Produced more balanced corrections across different flow ranges
+  - Despite improvements, still struggled with capturing the precise dynamics of this watershed
+
+While both models significantly improved forecasts for this challenging watershed, neither could fully overcome the fundamental difficulties presented by the extremely poor baseline NWM performance.
+
+### 6.3 Comparison of Model Architectures
+
+- **LSTM Strengths**: Performed well on systematic biases and showed good skill at capturing short-term patterns.
+
+- **Transformer Strengths**: Demonstrated slightly more consistent performance across lead times and marginally better metrics for the challenging watershed.
+
+- **Station Dependency**: Model architecture choice was less important than the inherent predictability of the watershed. Both architectures performed similarly for each respective station, suggesting that watershed characteristics, rather than model selection, were the dominant factor in forecast quality.
+
+- **Lead Time Performance**: Both architectures showed degraded performance at longer lead times, but the decline was much more pronounced for station 20380357.
+
+### 6.4 Key Observations
+
+1. **Watershed-Dependent Efficacy**: Deep learning correction techniques are highly effective for watersheds where the NWM has moderate skill (station 21609641) but face limitations in watersheds where the NWM fundamentally lacks skill (station 20380357).
+
+2. **Bias Correction**: Both models excel at correcting systematic bias, which was the dominant error component in the NWM forecasts for both stations.
+
+3. **Hyperparameter Optimization Impact**: The tuning process revealed that transformers benefit from no dropout (0.0), while LSTMs require moderate dropout (0.2-0.3). All models converged to the same optimal learning rate (0.001).
+
+4. **Architecture Adaptability**: Different watersheds benefit from different model configurations, with the transformer for station 20380357 requiring twice the attention heads (8 vs. 4) compared to station 21609641.
 
 ## 7. Conclusion and Future Work
 
-[Summary, limitations, potential improvements.]
+This study demonstrates that deep learning approaches can substantially improve NWM streamflow forecasts by correcting systematic errors. Both LSTM and Transformer architectures showed significant skill in error correction, though their effectiveness was highly dependent on watershed characteristics and the quality of the underlying NWM forecasts.
+
+### Key Findings:
+
+1. For watersheds where the NWM shows moderate skill (station 21609641), error correction models can transform biased forecasts into highly accurate predictions across all lead times.
+
+2. For challenging watersheds with poor NWM performance (station 20380357), deep learning models can dramatically reduce bias but may not fully overcome fundamental deficiencies in the baseline forecast.
+
+3. The choice between LSTM and Transformer architectures has less impact than watershed characteristics, suggesting that site-specific factors are more critical than model architecture selection.
+
+4. Hyperparameter optimization is crucial for maximizing model performance, with different optimal configurations emerging for each station-model combination.
+
+### Limitations:
+
+1. The correction models are station-specific and would require retraining for different locations.
+
+2. When baseline NWM forecasts completely lack skill (e.g., station 20380357), even sophisticated deep learning approaches face fundamental limitations.
+
+3. The current approach requires historical observations for model training, limiting application to gauged watersheds.
+
+### Future Work:
+
+1. **Regionalization**: Develop regional error correction models that can be applied to ungauged watersheds by leveraging watershed characteristics and nearby gauge performance.
+
+2. **Multivariate Inputs**: Incorporate additional meteorological variables (precipitation, temperature) and watershed characteristics to improve prediction accuracy.
+
+3. **Hybrid Physics-ML Models**: Explore integrating physical constraints with deep learning to improve performance in challenging watersheds.
+
+4. **Ensemble Methods**: Implement ensemble approaches combining multiple error correction models to increase robustness and quantify uncertainty.
+
+5. **Operational Integration**: Develop operational workflows for real-time error correction that can be integrated with existing NWM forecast systems.
+
+This research demonstrates the potential for deep learning to enhance operational streamflow forecasts, particularly for correcting systematic biases. The station-dependent performance highlights the need for careful model selection and evaluation based on local watershed characteristics.

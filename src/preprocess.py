@@ -63,7 +63,7 @@ def align_and_merge(nwm_data, usgs_data):
 
 def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18):
     """
-    Process data for a specific station.
+    Process data for a specific station, including resampling and interpolation.
     
     Args:
         station_id: Station identifier
@@ -104,7 +104,6 @@ def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18
         try:
             df = pd.read_csv(file, dtype={'streamflow_value': float})
             nwm_dfs.append(df)
-            print(f"Loaded {os.path.basename(file)}")
         except Exception as e:
             print(f"Error loading {file}: {e}")
     
@@ -115,7 +114,6 @@ def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18
     nwm_data = pd.concat(nwm_dfs, ignore_index=True)
 
     # --- Calculate Lead Time and Rename Columns ---
-    # Rename NWM columns first
     nwm_data = nwm_data.rename(columns={
         "streamflow_value": "nwm_flow", 
         "model_output_valid_time": "valid_time",
@@ -128,61 +126,84 @@ def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18
 
     # Calculate lead time in hours
     nwm_data["lead_time"] = (nwm_data["valid_time"] - nwm_data["init_time"]).dt.total_seconds() / 3600
-    nwm_data["lead_time"] = nwm_data["lead_time"].astype(int) # Convert to integer hours
+    nwm_data["lead_time"] = nwm_data["lead_time"].astype(int)
 
     # Filter for required lead times (1-18 hours)
     nwm_data = nwm_data[nwm_data["lead_time"].between(1, horizon)]
     print(f"Filtered NWM data to {len(nwm_data)} records for lead times 1-{horizon}h")
     
-    # Load USGS observations
+    # --- Load, Resample, and Interpolate USGS observations ---
     try:
+        # Load with DateTime as index
         usgs_data = pd.read_csv(usgs_file, parse_dates=['DateTime'], index_col='DateTime')
-        print(f"Loaded USGS columns: {usgs_data.columns.tolist()}") # Print columns to find the flow value
+        print(f"Loaded USGS columns: {usgs_data.columns.tolist()}") 
         
         # Identify the flow column 
-        flow_col_name = 'USGSFlowValue' # Updated based on debug output
+        flow_col_name = 'USGSFlowValue' 
 
-        if flow_col_name in usgs_data.columns:
-            # Perform unit conversion if needed (assuming cfs to cms)
-            usgs_data[flow_col_name] = usgs_data[flow_col_name] * 0.0283168
-            # Rename the identified flow column to 'usgs_flow'
-            usgs_data = usgs_data.rename(columns={flow_col_name: 'usgs_flow'})
-        else:
-            print(f"Error: Expected flow column '{flow_col_name}' not found in USGS data {usgs_file}. Cannot calculate error.")
-            return False # Stop processing this station if flow data is missing
-            
-        usgs_data = usgs_data.reset_index() # Reset index after potential renaming
-        print(f"Loaded and processed USGS data with {len(usgs_data)} records")
+        if flow_col_name not in usgs_data.columns:
+            print(f"Error: Expected flow column '{flow_col_name}' not found in USGS data {usgs_file}.")
+            return False 
+
+        # Select only the flow column for resampling/interpolation
+        usgs_flow = usgs_data[[flow_col_name]].copy()
+
+        # Resample to hourly frequency, taking the mean if multiple points fall in one hour
+        usgs_flow_hourly = usgs_flow.resample('H').mean() 
+        print(f"Resampled USGS to hourly: {len(usgs_flow_hourly)} records")
+        
+        # Interpolate missing values (e.g., linear)
+        usgs_flow_hourly = usgs_flow_hourly.interpolate(method='linear') 
+        print(f"Interpolated missing values using 'linear' method.")
+        
+        # Check for remaining NaNs after interpolation
+        remaining_nans = usgs_flow_hourly[flow_col_name].isna().sum()
+        if remaining_nans > 0:
+            print(f"Warning: {remaining_nans} NaN values remain after interpolation. Consider backfill/forward fill.")
+            usgs_flow_hourly = usgs_flow_hourly.fillna(method='bfill').fillna(method='ffill')
+        
+        # Rename the identified flow column to 'usgs_flow'
+        usgs_flow_hourly = usgs_flow_hourly.rename(columns={flow_col_name: 'usgs_flow'})
+        
+        # Reset index to make 'DateTime' a column named 'datetime' for merging
+        usgs_data_processed = usgs_flow_hourly.reset_index().rename(columns={'DateTime': 'datetime'})
+        
+        print(f"Processed USGS data with {len(usgs_data_processed)} hourly records after resampling/interpolation.")
+        
     except Exception as e:
         print(f"Error loading or processing USGS data: {e}")
+        import traceback
+        traceback.print_exc()
         return False
     
-    # Align and merge data
-    # Pass the prepared nwm_data and usgs_data (now guaranteed to have 'usgs_flow')
-    merged_data = align_and_merge(nwm_data, usgs_data)
+    # --- Align and merge data ---
+    merged_data = align_and_merge(nwm_data, usgs_data_processed)
     if merged_data.empty:
         print("Merged data is empty. Check alignment logic and data content.")
         return False
     print(f"Merged data has {len(merged_data)} records after alignment.")
 
     # --- Pivot data to have lead times as columns --- 
-    # This structure is often better for sequence creation when predicting multiple steps ahead
     pivot_data = merged_data.pivot_table(
         index=merged_data.index, 
         columns='lead_time', 
         values=['nwm_flow', 'usgs_flow', 'error']
     )
     pivot_data.columns = [f'{val}_{lead}' for val, lead in pivot_data.columns]
-    pivot_data = pivot_data.dropna() # Drop rows with any missing lead times after pivot
-    print(f"Pivoted data shape: {pivot_data.shape}")
+    
+    # Drop rows with ANY missing values AFTER pivoting
+    initial_pivot_rows = len(pivot_data)
+    pivot_data = pivot_data.dropna() 
+    rows_dropped = initial_pivot_rows - len(pivot_data)
+    print(f"Pivoted data shape before dropna: ({initial_pivot_rows}, {pivot_data.shape[1]})")
+    print(f"Dropped {rows_dropped} rows due to NaNs after pivoting.")
+    print(f"Final pivoted data shape: {pivot_data.shape}")
 
     if pivot_data.empty:
-        print("Pivoted data is empty. Check for gaps in lead times.")
+        print("Pivoted data is empty after dropna. Check for persistent gaps in NWM or USGS data.")
         return False
 
-    # --- Feature Selection (using pivoted data) ---
-    # Example: Use past errors and NWM forecasts for all lead times as features
-    # Adjust feature selection based on modeling strategy
+    # --- Feature Selection ---
     feature_cols = [col for col in pivot_data.columns if col.startswith('error_') or col.startswith('nwm_flow_')]
     target_cols = [f'error_{i}' for i in range(1, horizon + 1)]
     
@@ -190,23 +211,19 @@ def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18
     target = pivot_data[target_cols]
 
     # Create sequences for time series modeling using only features
-    # The function returns feature sequences (X) and the corresponding end-of-sequence indices
-    X, _, sequence_end_indices = create_sequences(features.values, window_size, 1) # Use horizon=1 as we select targets later
+    X, _, sequence_end_indices = create_sequences(features.values, window_size, 1) 
     if X is None:
         print("Sequence creation failed. Check data and parameters.")
         return False
     
     # Select the corresponding targets using the indices returned by create_sequences
-    # The indices correspond to the *end* of each sequence in the original pivot_data
     y = target.iloc[sequence_end_indices].values
-    sequence_start_indices = pivot_data.index[sequence_end_indices] # Get the actual datetime indices
+    sequence_start_indices = pivot_data.index[sequence_end_indices] 
 
-    # y shape should be (samples, num_target_features) where num_target_features = horizon
     print(f"Created {len(X)} sequences with shape X: {X.shape}, y: {y.shape}")
     
     # Split data: Train (Apr 2021-Sep 2022), Test (Oct 2022-Apr 2023)
     split_date = pd.to_datetime('2022-10-01')
-    # Use the datetime indices for splitting
     X_train, y_train, X_test, y_test, train_indices, test_indices = temporal_split(
         X, y, sequence_start_indices, split_date
     )
@@ -218,48 +235,36 @@ def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18
     print(f"Train set size: {X_train.shape[0]}, Test set size: {X_test.shape[0]}")
 
     # --- Scaling ---
-    # Reshape X for scaler (samples * timesteps, features)
     n_samples_train, n_timesteps_train, n_features_train = X_train.shape
     X_train_reshaped = X_train.reshape(-1, n_features_train)
     
     n_samples_test, n_timesteps_test, n_features_test = X_test.shape
     X_test_reshaped = X_test.reshape(-1, n_features_test)
 
-    # Reshape y for scaler (samples, horizon_outputs)
-    # y is already (samples, horizon_outputs), no need to reshape like before
     y_train_reshaped = y_train 
     y_test_reshaped = y_test
 
-    # Initialize scalers
     x_scaler = StandardScaler()
-    y_scaler = StandardScaler() # Scale targets together
+    y_scaler = StandardScaler() 
 
-    # Fit scalers ONLY on training data
     x_scaler.fit(X_train_reshaped)
-    y_scaler.fit(y_train_reshaped) # Fit on (samples, horizon_outputs)
+    y_scaler.fit(y_train_reshaped) 
 
-    # Transform train and test data
     X_train_scaled_reshaped = x_scaler.transform(X_train_reshaped)
     X_test_scaled_reshaped = x_scaler.transform(X_test_reshaped)
     y_train_scaled = y_scaler.transform(y_train_reshaped)
     y_test_scaled = y_scaler.transform(y_test_reshaped)
 
-    # Reshape X back to original sequence format (samples, timesteps, features)
     X_train_scaled = X_train_scaled_reshaped.reshape(n_samples_train, n_timesteps_train, n_features_train)
     X_test_scaled = X_test_scaled_reshaped.reshape(n_samples_test, n_timesteps_test, n_features_test)
-    # y_train_scaled and y_test_scaled are already in the correct shape (samples, horizon_outputs)
 
     print(f"Scaled Train X: {X_train_scaled.shape}, Scaled Test X: {X_test_scaled.shape}")
     print(f"Scaled Train y: {y_train_scaled.shape}, Scaled Test y: {y_test_scaled.shape}")
 
     # Get original NWM and USGS data corresponding to the test sequences
-    # Use the test_indices which map back to the original pivot_data
     nwm_test_original = pivot_data[[f'nwm_flow_{i}' for i in range(1, horizon + 1)]].iloc[test_indices].values
     usgs_test_original = pivot_data[[f'usgs_flow_{i}' for i in range(1, horizon + 1)]].iloc[test_indices].values
-    # --- ADDITION: Get timestamps for the test set ---
-    # These timestamps correspond to the end of the input sequence window.
-    # The forecast target is for the hour *after* this timestamp.
-    test_timestamps = pivot_data.index[test_indices].values # Get as numpy array for saving
+    test_timestamps = pivot_data.index[test_indices].values 
 
     # Save processed data and scalers
     train_dir = os.path.join(output_dir, 'train')
@@ -275,14 +280,13 @@ def process_station(station_id, data_dir, output_dir, window_size=24, horizon=18
     x_scaler_file = os.path.join(scaler_dir, f"{station_id}_x_scaler.joblib")
     y_scaler_file = os.path.join(scaler_dir, f"{station_id}_y_scaler.joblib")
     
-    # Save with keys expected by evaluate.py, including timestamps
     np.savez(train_file, X_train=X_train_scaled, y_train_scaled=y_train_scaled)
     np.savez(test_file, 
              X_test=X_test_scaled, 
              y_test_scaled=y_test_scaled, 
              nwm_test_original=nwm_test_original, 
              usgs_test_original=usgs_test_original,
-             test_timestamps=test_timestamps) # <-- Added timestamps
+             test_timestamps=test_timestamps) 
     
     joblib.dump(x_scaler, x_scaler_file)
     joblib.dump(y_scaler, y_scaler_file)

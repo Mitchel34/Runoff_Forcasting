@@ -28,9 +28,27 @@ def load_data(station_id, data_type='train'):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Processed data file not found: {file_path}")
     data = np.load(file_path)
+    
+    # Check keys in the data file
+    available_keys = list(data.keys())
+    print(f"Available keys in the data file: {available_keys}")
+    
+    # Handle different key naming conventions
+    if 'X_train' in data and 'y_train_scaled' in data:
+        X = data['X_train']
+        y = data['y_train_scaled']
+    elif 'X_test' in data and 'y_test_scaled' in data:
+        X = data['X_test']
+        y = data['y_test_scaled']
+    elif 'X' in data and 'y' in data:
+        X = data['X']
+        y = data['y']
+    else:
+        raise KeyError(f"Expected data keys not found in {file_path}. Available keys: {available_keys}")
+    
     print(f"Loaded {data_type} data for station {station_id} from {file_path}")
-    print(f"  X shape: {data['X'].shape}, y shape: {data['y'].shape}")
-    return data['X'], data['y']
+    print(f"  X shape: {X.shape}, y shape: {y.shape}")
+    return X, y
 
 def load_scaler(station_id, scaler_type='X'):
     """Loads the scaler object for a given station and type (X/y)."""
