@@ -1,35 +1,3 @@
-<<<<<<< HEAD
-import numpy as np
-
-
-def correlation_coefficient(obs, pred):
-    """Pearson correlation coefficient between obs and pred."""
-    if len(obs) < 2:
-        return np.nan
-    return np.corrcoef(obs, pred)[0, 1]
-
-
-def rmse(obs, pred):
-    """Root Mean Square Error."""
-    return np.sqrt(np.mean((pred - obs)**2))
-
-
-def pbias(obs, pred):
-    """Percent bias."""
-    # avoid division by zero
-    denom = np.sum(obs)
-    if denom == 0:
-        return np.nan
-    return 100.0 * np.sum(pred - obs) / denom
-
-
-def nse(obs, pred):
-    """Nash-Sutcliffe Efficiency."""
-    denom = np.sum((obs - np.mean(obs))**2)
-    if denom == 0:
-        return np.nan
-    return 1 - np.sum((obs - pred)**2) / denom
-=======
 """
 Utility functions for the runoff forecasting project, including evaluation metrics.
 """
@@ -259,4 +227,3 @@ def positional_encoding(seq_len: int, d_model: int) -> np.ndarray:
     pos_enc[:, 1::2] = np.cos(positions * div_term)
     
     return pos_enc
->>>>>>> lstm_transformer

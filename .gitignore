@@ -16,7 +16,6 @@ venv.bak/
 
 # Data, Models, Results, Logs
 data/processed/
-data/raw/
 models/
 results/hyperparameters/
 results/metrics/
