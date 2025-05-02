@@ -20,6 +20,9 @@
 *   **Motivation:** Accurate short-term runoff forecasts are crucial for water resource management, flood prediction, and ecological monitoring. Correcting NWM errors can lead to more reliable operational forecasts.
 *   **Stations Studied:** 21609641 (California) & 20380357 (Colorado)
 
+**[PLOT: Insert map showing the two station locations with watershed boundaries]**
+*Discussion points: These stations represent different hydrologic regimes and demonstrate the varying performance of NWM across different geographic regions.*
+
 ---
 
 ## Slide 3: Approach & Workflow (1 min)
@@ -32,6 +35,9 @@
     5.  **Training:** Train final models on the training dataset.
     6.  **Evaluation:** Assess model performance on a held-out test set using standard metrics (CC, RMSE, PBIAS, NSE) and compare against the original NWM forecast.
 *   **(Visual):** High-level flowchart diagram illustrating these steps.
+
+**[PLOT: Insert workflow diagram showing the pipeline from data input through model training to evaluation]**
+*Discussion points: This end-to-end pipeline allows for systematic comparison between model types and provides a framework that could be extended to other stations.*
 
 ---
 
@@ -47,6 +53,9 @@
     *   Features: Streamflow, Timestamp
 *   **Time Period:** April 2021 - April 2023
 *   **Lead Times:** 1 to 18 hours ahead
+
+**[PLOT: Insert time series graph showing raw USGS observations vs NWM forecasts for a sample period]**
+*Discussion points: Notice the systematic bias in NWM forecasts compared to observations - sometimes overestimating (Station 20380357) and sometimes closely following the pattern but with timing or magnitude errors (Station 21609641).*
 
 ---
 
@@ -65,6 +74,9 @@
     10. Scale Data: StandardScaler (fit only on training data)
     11. Save: Scaled data, original test flows, test timestamps, scalers
 
+**[PLOT: Insert diagram showing data structuring and sequence creation]**
+*Discussion points: The sequence-based approach allows models to learn temporal patterns in NWM errors, and the structure ensures we're always predicting future errors rather than looking at contemporaneous data.*
+
 ---
 
 ## Slide 6: Model Architectures (1.5 mins)
@@ -74,6 +86,9 @@
     *   **LSTM Model:** Input (24x36) -> LSTM Layer -> Dense Output (18)
     *   **Transformer Model:** Input (24x36) -> Multiple Transformer Encoder Blocks (Multi-Head Attention + FeedForward) -> Global Average Pooling -> MLP Head -> Dense Output (18)
 *   **Total Models Trained:** 4 (LSTM and Transformer for each station)
+
+**[PLOT: Insert architecture diagrams for both LSTM and Transformer models]**
+*Discussion points: LSTM captures sequential dependencies through its gates, while Transformer leverages self-attention to identify relationships between timesteps at any distance. The hyperparameters were tuned separately for each station to optimize performance.*
 
 ---
 
@@ -90,6 +105,9 @@
     *   Callbacks: EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
     *   Trained on full training set with validation split
     *   **All 4 models (LSTM and Transformer for both stations) were trained and saved**
+
+**[PLOT: Insert learning curves showing training and validation loss over epochs]**
+*Discussion points: The learning curves demonstrate model convergence and help identify potential overfitting. The validation curves flatten after sufficient epochs, indicating that our early stopping criteria were effective.*
 
 ---
 
@@ -108,6 +126,9 @@
     *   PBIAS (Percent Bias)
     *   NSE (Nash-Sutcliffe Efficiency)
 
+**[PLOT: Insert diagram illustrating the evaluation flow from prediction to metrics calculation]**
+*Discussion points: These metrics were calculated for each lead time (1-18 hours), allowing us to assess how the models perform for different forecast horizons. This is crucial as forecasts typically degrade with increasing lead time.*
+
 ---
 
 ## Slide 9: Key Results - Station 21609641
@@ -121,6 +142,12 @@
     *   Also maintained high CC and improved PBIAS and NSE
     *   Performance similar to LSTM, with some differences in RMSE and bias correction
 *   **Interpretation:** Both models effectively corrected systematic bias and improved skill, especially at longer lead times
+
+**[PLOT 1: Insert boxplot showing distribution of runoff values for Station 21609641 across lead times]**
+*Discussion points: Note the long whiskers in the observed data boxplot, indicating high flow variability at this station. Both models (green) effectively match the observed flow distribution (blue), correcting the systematic biases in the original NWM forecast (orange).*
+
+**[PLOT 2: Insert line graph showing NSE or RMSE metrics vs lead time for NWM and corrected forecasts]**
+*Discussion points: The corrected forecasts maintain higher skill (NSE) or lower error (RMSE) than NWM across all lead times, with the greatest improvements at longer lead times where NWM accuracy naturally degrades.*
 
 ---
 
@@ -137,6 +164,12 @@
     *   CC remained near zero
 *   **Interpretation:** Both models struggled due to poor baseline NWM forecast. Some improvement in magnitude, but overall skill still lacking
 
+**[PLOT 1: Insert boxplot showing distribution of runoff values for Station 20380357 across lead times]**
+*Discussion points: Notice the extremely short whiskers in the observed data boxplot, indicating very consistent low flows at this station (near 0-2 cfs). The NWM drastically overestimates flow (orange boxes up to 80+ cfs). Both models significantly reduced this overestimation but couldn't fully correct such a severe baseline error.*
+
+**[PLOT 2: Insert monthly distribution boxplots for PBIAS or RMSE metrics]**
+*Discussion points: The monthly distribution shows consistent NWM overestimation across all seasons. While our models reduced the bias, the fundamental disconnect between NWM and observations limited correction effectiveness.*
+
 ---
 
 ## Slide 11: Discussion
@@ -145,6 +178,9 @@
 *   **Baseline Quality Matters:** Deep learning models struggle to correct errors when the underlying physical model forecast (NWM) has very low initial skill
 *   **Trade-offs:** LSTM and Transformer improved RMSE/PBIAS but not CC/NSE for the hardest station
 *   **Limitations:** Negative NSE scores indicate corrected forecasts were still less accurate than simply using the mean observed flow for the test period
+
+**[PLOT: Insert comparison plot showing improvement percentages across all metrics and both stations]**
+*Discussion points: This comparison highlights the stark difference in correction success between stations. Where NWM had reasonable baseline performance (Station 21609641), our models achieved significant improvements. Where NWM fundamentally misrepresented the flow regime (Station 20380357), even sophisticated deep learning struggled to fully bridge the gap.*
 
 ---
 
@@ -158,6 +194,9 @@
 *   Investigate scaling warning
 *   Post-processing (e.g., non-negative flow constraints)
 
+**[PLOT: Insert conceptual diagram showing potential enhanced model architecture with additional data sources]**
+*Discussion points: Future work could leverage additional meteorological and physiographic inputs that might help explain the systematic errors in NWM forecasts, particularly for challenging stations like 20380357.*
+
 ---
 
 ## Slide 13: Conclusion
@@ -168,6 +207,9 @@
 *   Both models struggled with station 20380357 due to poor baseline NWM forecast
 *   The quality of the input physical model forecast is a critical limiting factor for data-driven error correction
 *   Demonstrated a viable workflow for NWM error correction but highlighted the challenges and station-specific nature of the problem
+
+**[PLOT: Insert a compelling "before and after" time series showing raw NWM, observations, and corrected forecast for a high-flow event]**
+*Discussion points: This event illustrates how our error correction approach can lead to more accurate forecasts during critical high-flow periods, potentially improving flood prediction capabilities.*
 
 ---
 
