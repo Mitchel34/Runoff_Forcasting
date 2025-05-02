@@ -1,166 +1,164 @@
 # Runoff Forecasting: NWM Error Correction with Deep Learning
 
 This project implements deep learning models to improve National Water Model (NWM) runoff forecasts through error prediction. It uses specialized architectures for two distinct USGS stations:
-- **Station 21609641**: LSTM-based error prediction model
-- **Station 20380357**: Transformer-based error prediction model
+- **Station 21609641**: LSTM-based and Transformer-based error prediction models
+- **Station 20380357**: LSTM-based and Transformer-based error prediction models
 
-## Project Structure
+## Project Setup
 
+### 1. Environment Setup
+
+This project requires Python 3.10 specifically for compatibility with TensorFlow and other dependencies.
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd runoff_forecasting
+
+# Create and activate a Python 3.10 virtual environment
+python3.10 -m venv .venv
+
+# On macOS/Linux
+source .venv/bin/activate 
+
+# On Windows
+.venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
-runoff_forecasting/
-├── data/
-│   ├── raw/                  # Original NWM and USGS data
-│   └── processed/            # Preprocessed data ready for training
-├── src/
-│   ├── preprocess.py         # Data preprocessing pipeline
-│   ├── models/
-│   │   ├── lstm.py           # LSTM implementation for station 21609641
-│   │   └── transformer.py    # Transformer implementation for station 20380357
-│   ├── train.py              # Model training script
-│   ├── evaluate.py           # Evaluation and visualization
-│   ├── tune.py               # Hyperparameter tuning script
-│   └── utils.py              # Utility functions and metrics
-├── notebooks/                # Exploratory data analysis
-├── results/                  # Saved results and visualizations
-│   ├── plots/                # Generated visualizations
-│   └── metrics/              # Performance metrics
-├── models/                   # Saved model files
-├── report/                   # Technical report
-└── requirements.txt          # Project dependencies
-```
 
-## Setup and Installation
-
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository-url>
-    cd runoff_forecasting
-    ```
-
-2.  **Create and activate a Python virtual environment:**
-    It is recommended to use Python 3.10 for compatibility with the specified dependencies (especially `tensorflow-macos`).
-    ```bash
-    python3.10 -m venv .venv
-    source .venv/bin/activate 
-    # On Windows use: .venv\Scripts\activate
-    ```
-
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-## Data Preparation
+### 2. Data Preparation
 
 The project requires NWM forecast data and USGS observation data for two stations:
 - Station 21609641 (USGS gauge 11266500)
 - Station 20380357 (USGS gauge 09520500)
 
-## Data Preprocessing
+Ensure your data is organized in the `data/raw/<station_id>/` directories.
 
-Raw NWM forecast data and USGS observation data should be placed in the `data/raw/<station_id>/` directories. The expected structure is shown in the Project Structure section.
+### 3. Running the Complete Workflow
 
-To preprocess the data for both stations (20380357 and 21609641), run the preprocessing script:
+#### A. Data Preprocessing
 
-```bash
-python3 src/preprocess.py
-```
-
-This script will:
-- Load raw NWM and USGS data.
-- Align timestamps and merge the datasets.
-- Calculate forecast error (`usgs_flow - nwm_flow`).
-- Pivot the data to have lead times (1-18h) as columns.
-- Create input sequences (24hr lookback) and corresponding target sequences (18hr forecast error).
-- Split data into training (Apr 2021 - Sep 2022) and testing (Oct 2022 - Apr 2023) sets.
-- Scale features and targets using `StandardScaler` (fitted on training data only).
-- Save the processed data (`.npz` files) and scalers (`.joblib` files) to the `data/processed/` directory.
-
-Default arguments:
-- `--data-dir`: `data/raw`
-- `--output-dir`: `data/processed`
-- `--window-size`: `24` (hours)
-- `--horizon`: `18` (hours)
-
-You can override these defaults if needed, e.g.:
-```bash
-python src/preprocess.py --window-size 48 --output-dir data/processed_ws48
-```
-
-## Hyperparameter Tuning
-
-Before final training, hyperparameter tuning is performed using `src/tune.py` to find the optimal configuration for each model (LSTM and Transformer).
-
--   **Library:** Keras Tuner
--   **Strategy:** A hybrid approach is recommended:
-    1.  **Hyperband:** Run first for broad exploration (`--tuner hyperband`).
-    2.  **Bayesian Optimization:** Run second to refine promising configurations (`--tuner bayesian`).
--   **Process:** The script trains multiple model versions with different hyperparameter combinations (learning rate, layer sizes, dropout, etc.) on a validation split of the training data, aiming to minimize validation loss.
--   **Output:** The best hyperparameters found are printed to the console and saved to a JSON file in the `results/hyperparameters/` directory (e.g., `results/hyperparameters/21609641_lstm_best_hps.json`). This file can be used to configure the final training in `train.py`.
-
-**Example Tuning Commands (run from project root):**
+Preprocess data for both stations (creates training/testing datasets and scales data):
 
 ```bash
-# 1. Hyperband Tuning (Example for LSTM)
-python src/tune.py --station_id 21609641 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 64
-
-# 2. Bayesian Optimization Tuning (Example for Transformer, refining after Hyperband)
-python src/tune.py --station_id 20380357 --model_type transformer --tuner bayesian --max_trials 30 --epochs_per_trial 80 --batch_size 64
+python src/preprocess.py
 ```
 
-## Workflow
+This creates sequences with a 24-hour lookback window to predict 18 hours of forecast errors.
 
-1.  **Preprocess data**:
-    ```bash
-    python src/preprocess.py
-    ```
+#### B. Hyperparameter Tuning (for all 4 models)
 
-2.  **(Optional but Recommended) Hyperparameter Tuning**:
-    *   Run Hyperband:
-        ```bash
-        python src/tune.py --station_id <station_id> --model_type <lstm|transformer> --tuner hyperband ...
-        ```
-    *   Run Bayesian Optimization (potentially refining search space based on Hyperband):
-        ```bash
-        python src/tune.py --station_id <station_id> --model_type <lstm|transformer> --tuner bayesian ...
-        ```
-    *   Note the best hyperparameters found for each station/model.
+For best results, we use a two-stage tuning approach (Hyperband followed by Bayesian Optimization):
 
-3.  **Train final models** (using best hyperparameters from tuning):
-    ```bash
-    # Example for LSTM (Station 21609641)
-    python src/train.py --station_id 21609641 --model_type lstm --epochs 100 --batch_size <best_batch> --lr <best_lr> --lstm_units <best_units> # Add other tuned params
+##### Stage 1: Hyperband Tuning
 
-    # Example for Transformer (Station 20380357)
-    python src/train.py --station_id 20380357 --model_type transformer --epochs 100 --batch_size <best_batch> --lr <best_lr> --tf_heads <best_heads> --tf_ff_dim <best_ff_dim> --tf_blocks <best_blocks> --tf_dropout <best_dropout> # Add other tuned params
-    ```
+```bash
+# 1. LSTM for Station 21609641
+python src/tune.py --station_id 21609641 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 64 --max_trials 30
 
-4.  **Evaluate and visualize results**:
-    ```bash
-    # Evaluate LSTM
-    python src/evaluate.py --station_id 21609641 --model_type lstm
+# 2. Transformer for Station 21609641 
+python src/tune.py --station_id 21609641 --model_type transformer --tuner hyperband --epochs_per_trial 50 --batch_size 64 --max_trials 30
 
-    # Evaluate Transformer
-    python src/evaluate.py --station_id 20380357 --model_type transformer
-    ```
+# 3. LSTM for Station 20380357
+python src/tune.py --station_id 20380357 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 64 --max_trials 30
 
-## Evaluation Metrics
+# 4. Transformer for Station 20380357
+python src/tune.py --station_id 20380357 --model_type transformer --tuner hyperband --epochs_per_trial 50 --batch_size 64 --max_trials 30
+```
 
-The models are evaluated using the following hydrological metrics:
-- Correlation Coefficient (CC)
-- Root Mean Square Error (RMSE)
-- Percent Bias (PBIAS)
-- Nash-Sutcliffe Efficiency (NSE)
+##### Stage 2: Bayesian Optimization (refining the search)
+
+```bash
+# 1. LSTM for Station 21609641
+python src/tune.py --station_id 21609641 --model_type lstm --tuner bayesian --epochs_per_trial 80 --batch_size 64 --max_trials 20
+
+# 2. Transformer for Station 21609641 
+python src/tune.py --station_id 21609641 --model_type transformer --tuner bayesian --epochs_per_trial 80 --batch_size 64 --max_trials 20
+
+# 3. LSTM for Station 20380357
+python src/tune.py --station_id 20380357 --model_type lstm --tuner bayesian --epochs_per_trial 80 --batch_size 64 --max_trials 20
+
+# 4. Transformer for Station 20380357
+python src/tune.py --station_id 20380357 --model_type transformer --tuner bayesian --epochs_per_trial 80 --batch_size 64 --max_trials 20
+```
+
+The best hyperparameters will be saved to `.json` files in the `results/hyperparameters` directory. Review the console output or these files to find the optimal configurations.
+
+#### C. Model Training (with optimal hyperparameters)
+
+Train the four models using the hyperparameters found during tuning:
+
+```bash
+# 1. LSTM for Station 21609641
+python src/train.py --station_id 21609641 --model_type lstm --epochs 100 --batch_size 64 \
+    --lstm_units 128 --dropout_rate 0.2 --lr 0.001
+
+# 2. Transformer for Station 21609641
+python src/train.py --station_id 21609641 --model_type transformer --epochs 100 --batch_size 64 \
+    --num_encoder_blocks 6 --num_heads 4 --head_size 32 --ff_dim 64 --dropout_rate 0.0 \
+    --mlp_units 64 --mlp_dropout 0.0 --lr 0.001
+
+# 3. LSTM for Station 20380357
+python src/train.py --station_id 20380357 --model_type lstm --epochs 100 --batch_size 64 \
+    --lstm_units 192 --dropout_rate 0.3 --lr 0.001
+
+# 4. Transformer for Station 20380357
+python src/train.py --station_id 20380357 --model_type transformer --epochs 100 --batch_size 64 \
+    --num_encoder_blocks 4 --num_heads 8 --head_size 32 --ff_dim 192 --dropout_rate 0.0 \
+    --mlp_units 64 --mlp_dropout 0.0 --lr 0.001
+```
+
+**Note**: You can also load hyperparameters from the saved JSON files:
+
+```bash
+# Example of using saved hyperparameters
+python src/train.py --station_id 21609641 --model_type lstm --epochs 100 --batch_size 64 \
+    --hyperparams_file results/hyperparameters/21609641_lstm_best_hps.json
+```
+
+#### D. Model Evaluation
+
+Evaluate each model on the test dataset (Oct 2022 - Apr 2023):
+
+```bash
+# 1. LSTM for Station 21609641
+python src/evaluate.py --station_id 21609641 --model_type lstm
+
+# 2. Transformer for Station 21609641
+python src/evaluate.py --station_id 21609641 --model_type transformer
+
+# 3. LSTM for Station 20380357
+python src/evaluate.py --station_id 20380357 --model_type lstm
+
+# 4. Transformer for Station 20380357
+python src/evaluate.py --station_id 20380357 --model_type transformer
+```
+
+This generates evaluation metrics and visualizations in the `results` directory:
+- Metrics are saved as CSV files in `results/metrics`
+- Plots are saved as PNG files in `results/plots`
+
+### 4. Expected Results
+
+The evaluation generates multiple metrics for comparing original NWM forecasts with corrected forecasts:
+- **Correlation Coefficient (CC)**: Measures timing/pattern match
+- **Root Mean Square Error (RMSE)**: Measures absolute magnitude of errors
+- **Percent Bias (PBIAS)**: Measures systematic under/overestimation
+- **Nash-Sutcliffe Efficiency (NSE)**: Measures overall model skill
+
+Based on prior runs, expect:
+- **Station 21609641**: Both models significantly improve PBIAS and NSE
+- **Station 20380357**: Both models struggle due to poor baseline NWM data, but still reduce RMSE and PBIAS
+
+## Visualizing Results
+
+After running the evaluation, review the generated plots in `results/plots`:
+- Box plots showing flow distributions across lead times
+- Line plots showing metrics vs. lead times
+- Monthly distribution plots for key metrics
 
 ## Authors
 
 Mitchel Carson & Christian Castaneda
-
-## License
-
-[MIT](LICENSE)
-
-## Acknowledgments
-
-This project is based on methods from:
-- Han, H. & Morrison, R. R. (2022). Improved runoff forecasting performance through error predictions using a deep-learning approach. Journal of Hydrology, 608, 127653.
