@@ -152,6 +152,63 @@ Based on prior runs, expect:
 - **Station 21609641**: Both models significantly improve PBIAS and NSE
 - **Station 20380357**: Both models struggle due to poor baseline NWM data, but still reduce RMSE and PBIAS
 
+### 5. Using the Makefile for Automated Workflow
+
+This project includes a Makefile to automate the complete workflow. Before using the Makefile, make sure to activate your Python 3.10 virtual environment:
+
+```bash
+# On macOS/Linux
+source .venv/bin/activate 
+
+# On Windows
+.venv\Scripts\activate
+```
+
+#### Available Makefile Commands
+
+```bash
+# Create the required directory structure
+make setup
+
+# Run the complete workflow (preprocessing, tuning, training, evaluation)
+make all
+
+# Run individual steps
+make preprocess
+make tune
+make train
+make evaluate
+
+# Clean up generated files to restart the workflow
+make clean
+
+# Clean specific parts of the workflow
+make clean-processed   # Clean only processed data
+make clean-models      # Clean only trained models
+make clean-results     # Clean only results files
+make clean-logs        # Clean only log files
+```
+
+The Makefile handles dependencies between steps, so running `make all` will execute the entire workflow in the correct order.
+
+#### Workflow Reproducibility
+
+To reproduce the entire workflow from scratch:
+
+```bash
+# 1. Activate your Python 3.10 environment
+source .venv/bin/activate  # On macOS/Linux
+
+# 2. Clean any previous run artifacts
+make clean
+
+# 3. Set up directory structure (if needed)
+make setup
+
+# 4. Run the complete workflow
+make all
+```
+
 ## Visualizing Results
 
 After running the evaluation, review the generated plots in `results/plots`:
@@ -169,6 +226,5 @@ Mitchel Carson & Christian Castaneda
 predictions using a deep-learning approach. Journal of Hydrology, 608, 127653. https://doi.
 org/10.1016/j.jhydrol.2022.127653
 
-[2] Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin,
-I. (2017). Attention is all you need. In Advances in Neural Information Processing Systems
+[2] Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention is all you need. In Advances in Neural Information Processing Systems
 30 (NIPS 2017) (pp. 5998–6008). Long Beach, CA, USA: Neural Information Processing Systems.
