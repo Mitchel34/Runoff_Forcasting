@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Improving NWM Forecasts Using Deep Learning
 
 ## Project Overview
