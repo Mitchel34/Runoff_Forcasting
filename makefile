@@ -44,10 +44,10 @@ tune_bayesian: tune_hyperband
 # Model training with the best hyperparameters from tuning
 train: preprocess
 	@echo "====== Training Models with Best Hyperparameters ======"
-	python3 src/train.py --station_id 21609641 --model_type lstm --hyperparams_file results/hyperparameters/21609641_lstm_best_hps.json --epochs 100 --batch_size 64
-	python3 src/train.py --station_id 21609641 --model_type transformer --hyperparams_file results/hyperparameters/21609641_transformer_best_hps.json --epochs 100 --batch_size 64
-	python3 src/train.py --station_id 20380357 --model_type lstm --hyperparams_file results/hyperparameters/20380357_lstm_best_hps.json --epochs 100 --batch_size 64
-	python3 src/train.py --station_id 20380357 --model_type transformer --hyperparams_file results/hyperparameters/20380357_transformer_best_hps.json --epochs 100 --batch_size 64
+	python3 src/train.py --station_id 21609641 --model_type lstm --hp_json_path results/hyperparameters/21609641_lstm_best_hps.json --epochs 100 --batch_size 64
+	python3 src/train.py --station_id 21609641 --model_type transformer --hp_json_path results/hyperparameters/21609641_transformer_best_hps.json --epochs 100 --batch_size 64
+	python3 src/train.py --station_id 20380357 --model_type lstm --hp_json_path results/hyperparameters/20380357_lstm_best_hps.json --epochs 100 --batch_size 64
+	python3 src/train.py --station_id 20380357 --model_type transformer --hp_json_path results/hyperparameters/20380357_transformer_best_hps.json --epochs 100 --batch_size 64
 	@echo "====== Training Complete ======"
 
 # Model evaluation
