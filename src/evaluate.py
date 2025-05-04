@@ -155,6 +155,144 @@ def calculate_metrics_by_month(usgs_original: np.ndarray, nwm_original: np.ndarr
 
     return monthly_metrics
 
+def create_improvement_boxplots(original_flows, corrected_flows, observed_flows, station_id, model_type):
+    """
+    Create boxplots showing the percentage improvement of corrected forecasts over NWM forecasts.
+    
+    Args:
+        original_flows: DataFrame with original NWM forecast flows
+        corrected_flows: DataFrame with corrected forecast flows
+        observed_flows: DataFrame with observed actual flows
+        station_id: Station identifier
+        model_type: Model type (lstm or transformer)
+    """
+    # Calculate absolute errors for both original and corrected forecasts
+    original_errors = abs(original_flows - observed_flows)
+    corrected_errors = abs(corrected_flows - observed_flows)
+    
+    # Calculate percentage improvement at each point
+    # (positive values mean improvement, negative values mean degradation)
+    pct_improvement = ((original_errors - corrected_errors) / original_errors) * 100
+    
+    # Replace infinite values (caused by original_error = 0) with NaN
+    pct_improvement = pct_improvement.replace([np.inf, -np.inf], np.nan).dropna()
+    
+    # Create figure
+    plt.figure(figsize=(14, 10))
+    
+    # 1. Improvement by flow magnitude
+    plt.subplot(2, 2, 1)
+    
+    # Categorize flow by magnitude
+    flow_categories = pd.cut(observed_flows, 
+                            bins=[0, 10, 50, 100, float('inf')],
+                            labels=['Low (<10)', 'Medium (10-50)', 'High (50-100)', 'Very High (>100)'])
+    
+    # Create dataframe with improvements and categories
+    flow_df = pd.DataFrame({
+        'Improvement': pct_improvement.values.flatten(),
+        'Flow Category': flow_categories.values.flatten()
+    }).dropna()
+    
+    # Create boxplot
+    sns.boxplot(x='Flow Category', y='Improvement', data=flow_df)
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.title('Forecast Improvement by Flow Magnitude')
+    plt.xlabel('Observed Flow Magnitude (cms)')
+    plt.ylabel('Percentage Improvement (%)')
+    plt.ylim(-50, 100)  # Adjust as needed based on your data
+    
+    # 2. Improvement by lead time
+    plt.subplot(2, 2, 2)
+    
+    # Extract lead times from the data
+    if isinstance(pct_improvement, pd.DataFrame) and pct_improvement.shape[1] > 1:
+        # If we have separate columns for each lead time
+        lead_improvements = []
+        for lead in range(pct_improvement.shape[1]):
+            lead_values = pct_improvement.iloc[:, lead].dropna().tolist()
+            lead_improvements.extend([(lead+1, val) for val in lead_values])
+        
+        lead_df = pd.DataFrame(lead_improvements, columns=['Lead Time', 'Improvement'])
+    else:
+        # If we have a single column (reshape as needed)
+        lead_df = pd.DataFrame({
+            'Lead Time': 1,  # Adjust if you have lead time information
+            'Improvement': pct_improvement.values.flatten()
+        }).dropna()
+    
+    sns.boxplot(x='Lead Time', y='Improvement', data=lead_df)
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.title('Forecast Improvement by Lead Time')
+    plt.xlabel('Forecast Lead Time (hours)')
+    plt.ylabel('Percentage Improvement (%)')
+    plt.ylim(-50, 100)  # Adjust as needed
+    
+    # 3. Improvement by month/season
+    plt.subplot(2, 2, 3)
+    
+    # Extract month information from your timestamps
+    # This assumes your data has a DatetimeIndex or a column with dates
+    if isinstance(observed_flows.index, pd.DatetimeIndex):
+        dates = observed_flows.index
+    else:
+        # If you have timestamps in a different format, adjust accordingly
+        dates = pd.to_datetime(observed_flows.index)
+    
+    # Create dataframe with improvements and months
+    month_df = pd.DataFrame({
+        'Month': dates.month,
+        'Improvement': pct_improvement.values.flatten()
+    }).dropna()
+    
+    sns.boxplot(x='Month', y='Improvement', data=month_df)
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.title('Forecast Improvement by Month')
+    plt.xlabel('Month')
+    plt.xticks(range(12), ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
+    plt.ylabel('Percentage Improvement (%)')
+    plt.ylim(-50, 100)  # Adjust as needed
+    
+    # 4. Overall improvement distribution
+    plt.subplot(2, 2, 4)
+    
+    # Create overall boxplot
+    plt.boxplot(pct_improvement.values.flatten())
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.title('Overall Forecast Improvement Distribution')
+    plt.xlabel('All Forecasts')
+    plt.ylabel('Percentage Improvement (%)')
+    plt.ylim(-50, 100)  # Adjust as needed
+    plt.xticks([1], ['All Data'])
+    
+    # Add overall statistics as text
+    mean_imp = np.nanmean(pct_improvement.values)
+    median_imp = np.nanmedian(pct_improvement.values)
+    pct_positive = (pct_improvement > 0).sum() / pct_improvement.count() * 100
+    
+    plt.text(0.98, 0.02, 
+             f'Mean: {mean_imp:.2f}%\nMedian: {median_imp:.2f}%\n% Improved: {pct_positive:.1f}%',
+             transform=plt.gca().transAxes, ha='right', va='bottom',
+             bbox=dict(boxstyle='round', fc='white', alpha=0.8))
+    
+    # Adjust layout and save
+    plt.suptitle(f'Forecast Percentage Improvement: Station {station_id}, {model_type.upper()} Model',
+                fontsize=16)
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.92)
+    plt.savefig(f"results/plots/{station_id}_{model_type}_pct_improvement_boxplots.png", dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"Mean percentage improvement: {mean_imp:.2f}%")
+    print(f"Median percentage improvement: {median_imp:.2f}%")
+    print(f"Percentage of forecasts improved: {pct_positive:.1f}%")
+    
+    return {
+        'mean_pct_improvement': mean_imp,
+        'median_pct_improvement': median_imp,
+        'pct_forecasts_improved': pct_positive
+    }
+
 def evaluate_model(station_id, model_type):
     """Evaluates the trained model and generates results."""
     print(f"\n--- Starting Evaluation for Station {station_id} ({model_type.upper()}) ---")
@@ -381,6 +519,21 @@ def evaluate_model(station_id, model_type):
             plt.close()
 
         print("\nFinished generating visualizations.")
+
+        # --- Improvement Boxplots ---
+        print("\nGenerating improvement boxplots...")
+        improvement_stats = create_improvement_boxplots(
+            original_flows=pd.DataFrame(nwm_test_original),
+            corrected_flows=pd.DataFrame(corrected_nwm_forecasts),
+            observed_flows=pd.DataFrame(usgs_test_original),
+            station_id=station_id,
+            model_type=model_type
+        )
+        print(f"Improvement statistics: {improvement_stats}")
+
+        # Add these statistics to your results DataFrame
+        for key, value in improvement_stats.items():
+            metrics_df[key] = value
 
     except FileNotFoundError as e:
         print(f"Error: {e}")
