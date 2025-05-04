@@ -78,7 +78,6 @@ setup:
 clean:
 	@echo "====== Cleaning Up Generated Files ======"
 	rm -rf data/processed/*
-	rm -rf models/*
 	rm -rf results/hyperparameters/*
 	rm -rf results/metrics/*
 	rm -rf results/plots/*
