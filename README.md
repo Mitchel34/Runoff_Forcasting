@@ -24,9 +24,26 @@ source .venv/bin/activate
 # On Windows
 .venv\Scripts\activate
 
-# Install dependencies
+# Install dependencies (Remove -macos flags for tensorflow if necessary)
 pip install -r requirements.txt
+
+# Automated workflow
+To reproduce the entire workflow from scratch:
+
+# 1. Activate your Python 3.10 environment
+source .venv/bin/activate  # On macOS/Linux
+
+# 2. Clean any previous run artifacts
+make clean
+
+# 3. Set up directory structure (if needed)
+make setup
+
+# 4. Run the complete workflow
+make all
 ```
+
+
 
 ### 2. Data Preparation
 

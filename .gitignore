@@ -14,9 +14,8 @@ venv.bak/
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Data, Models, Results, Logs
+# Data, Results, Logs
 data/processed/
-models/
 results/hyperparameters/
 results/metrics/
 !results/plots/
