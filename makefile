@@ -26,28 +26,28 @@ tune: preprocess tune_hyperband tune_bayesian
 # Stage 1: Hyperband tuning
 tune_hyperband: preprocess
 	@echo "====== Running Hyperband Tuning ======"
-	PYTHONPATH=. python3 src/tune.py --station_id 21609641 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 64 --max_trials 30
-	PYTHONPATH=. python3 src/tune.py --station_id 21609641 --model_type transformer --tuner hyperband --epochs_per_trial 50 --batch_size 64 --max_trials 30
-	PYTHONPATH=. python3 src/tune.py --station_id 20380357 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 64 --max_trials 30
-	PYTHONPATH=. python3 src/tune.py --station_id 20380357 --model_type transformer --tuner hyperband --epochs_per_trial 50 --batch_size 64 --max_trials 30
+	PYTHONPATH=. python3 src/tune.py --station_id 21609641 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 128 --max_trials 30
+	PYTHONPATH=. python3 src/tune.py --station_id 21609641 --model_type transformer --tuner hyperband --epochs_per_trial 50 --batch_size 128 --max_trials 30
+	PYTHONPATH=. python3 src/tune.py --station_id 20380357 --model_type lstm --tuner hyperband --epochs_per_trial 50 --batch_size 128 --max_trials 30
+	PYTHONPATH=. python3 src/tune.py --station_id 20380357 --model_type transformer --tuner hyperband --epochs_per_trial 50 --batch_size 128 --max_trials 30
 	@echo "====== Hyperband Tuning Complete ======"
 
 # Stage 2: Bayesian optimization
 tune_bayesian: tune_hyperband
 	@echo "====== Running Bayesian Optimization ======"
-	PYTHONPATH=. python3 src/tune.py --station_id 21609641 --model_type lstm --tuner bayesian --epochs_per_trial 80 --batch_size 64 --max_trials 20
-	PYTHONPATH=. python3 src/tune.py --station_id 21609641 --model_type transformer --tuner bayesian --epochs_per_trial 80 --batch_size 64 --max_trials 20
-	PYTHONPATH=. python3 src/tune.py --station_id 20380357 --model_type lstm --tuner bayesian --epochs_per_trial 80 --batch_size 64 --max_trials 20
-	PYTHONPATH=. python3 src/tune.py --station_id 20380357 --model_type transformer --tuner bayesian --epochs_per_trial 80 --batch_size 64 --max_trials 20
+	PYTHONPATH=. python3 src/tune.py --station_id 21609641 --model_type lstm --tuner bayesian --epochs_per_trial 80 --batch_size 128 --max_trials 20
+	PYTHONPATH=. python3 src/tune.py --station_id 21609641 --model_type transformer --tuner bayesian --epochs_per_trial 80 --batch_size 128 --max_trials 20
+	PYTHONPATH=. python3 src/tune.py --station_id 20380357 --model_type lstm --tuner bayesian --epochs_per_trial 80 --batch_size 128 --max_trials 20
+	PYTHONPATH=. python3 src/tune.py --station_id 20380357 --model_type transformer --tuner bayesian --epochs_per_trial 80 --batch_size 128 --max_trials 20
 	@echo "====== Bayesian Optimization Complete ======"
 
 # Model training with the best hyperparameters from tuning
 train: preprocess
 	@echo "====== Training Models with Best Hyperparameters ======"
-	PYTHONPATH=. python3 src/train.py --station_id 21609641 --model_type lstm --hp_json_path results/hyperparameters/21609641_lstm_best_hps.json --epochs 100 --batch_size 64
-	PYTHONPATH=. python3 src/train.py --station_id 21609641 --model_type transformer --hp_json_path results/hyperparameters/21609641_transformer_best_hps.json --epochs 100 --batch_size 64
-	PYTHONPATH=. python3 src/train.py --station_id 20380357 --model_type lstm --hp_json_path results/hyperparameters/20380357_lstm_best_hps.json --epochs 100 --batch_size 64
-	PYTHONPATH=. python3 src/train.py --station_id 20380357 --model_type transformer --hp_json_path results/hyperparameters/20380357_transformer_best_hps.json --epochs 100 --batch_size 64
+	PYTHONPATH=. python3 src/train.py --station_id 21609641 --model_type lstm --hp_json_path results/hyperparameters/21609641_lstm_best_hps.json --epochs 100 --batch_size 128
+	PYTHONPATH=. python3 src/train.py --station_id 21609641 --model_type transformer --hp_json_path results/hyperparameters/21609641_transformer_best_hps.json --epochs 100 --batch_size 128
+	PYTHONPATH=. python3 src/train.py --station_id 20380357 --model_type lstm --hp_json_path results/hyperparameters/20380357_lstm_best_hps.json --epochs 100 --batch_size 128
+	PYTHONPATH=. python3 src/train.py --station_id 20380357 --model_type transformer --hp_json_path results/hyperparameters/20380357_transformer_best_hps.json --epochs 100 --batch_size 128
 	@echo "====== Training Complete ======"
 
 # Model evaluation

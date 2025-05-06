@@ -11,10 +11,14 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from joblib import load as joblib_load
+import time  # Add time for tracking performance
 
 # Import model building functions
 from models.lstm import build_lstm_model
 from models.transformer import build_transformer_model
+
+# Import GPU configuration
+from gpu_utils import configure_metal_gpu
 
 # Define paths using absolute paths based on script location
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,10 +68,25 @@ def load_scaler(station_id, scaler_type='X'):
     print(f"Loaded {scaler_type} scaler for station {station_id} from {scaler_path}")
     return scaler
 
-def train_model(station_id, model_type, epochs, batch_size, hyperparameters):
-    """Trains the specified model for the given station using provided hyperparameters."""
-    print(f"Starting training for Station {station_id} using {model_type.upper()} model.")
-    print("Using hyperparameters:", hyperparameters)
+def create_tf_dataset(X, y, batch_size, shuffle=True):
+    """Creates a TensorFlow dataset from input features and labels."""
+    dataset = tf.data.Dataset.from_tensor_slices((X, y))
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=1000)
+    dataset = dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    return dataset
+
+def train_model(station_id, model_type, hyperparameters, epochs=100, batch_size=64, verbose=1):
+    """Trains the model with the specified hyperparameters."""
+    # Enable Metal GPU acceleration if available
+    gpu_available = configure_metal_gpu()
+    
+    print(f"\n--- Starting Model Training for Station {station_id} ({model_type.upper()}) ---")
+    print(f"Using {'Metal GPU acceleration' if gpu_available else 'CPU only'}")
+    print(f"Epochs: {epochs}, Batch Size: {batch_size}")
+    print(f"Hyperparameters: {hyperparameters}")
+    
+    start_time = time.time()  # Track training time
 
     # Load training data
     X_train, y_train = load_data(station_id, 'train')
@@ -107,6 +126,13 @@ def train_model(station_id, model_type, epochs, batch_size, hyperparameters):
 
     model.summary()
 
+    # Add to train.py before model compilation
+    if gpu_available:
+        # Enable mixed precision for faster training on Metal
+        policy = tf.keras.mixed_precision.Policy('mixed_float16')
+        tf.keras.mixed_precision.set_global_policy(policy)
+        print("Mixed precision training enabled")
+
     # Compile the model - Use learning rate from HPs
     learning_rate = hyperparameters.get('learning_rate', 1e-3)
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
@@ -122,21 +148,26 @@ def train_model(station_id, model_type, epochs, batch_size, hyperparameters):
         ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6, verbose=1)
     ]
 
+    # Create TensorFlow datasets for training and validation
+    train_dataset = create_tf_dataset(X_train, y_train, batch_size)
+    val_dataset = create_tf_dataset(X_train[int(0.8 * len(X_train)):], y_train[int(0.8 * len(y_train)):], batch_size, shuffle=False)
+
     # Train the model
     print("\nStarting model training...")
     history = model.fit(
-        X_train, y_train,
+        train_dataset,
+        validation_data=val_dataset,
         epochs=epochs,
-        batch_size=batch_size,
-        validation_split=0.2,
-        callbacks=callbacks,
-        shuffle=True,
-        verbose=1
+        verbose=verbose,
+        callbacks=callbacks
     )
 
+    # After training, report performance metrics
+    training_time = time.time() - start_time
+    print(f"\nTraining completed in {training_time:.2f} seconds ({training_time/60:.2f} minutes)")
     print(f"\nTraining complete. Best model saved to {model_save_path}")
 
-    return history, model_save_path
+    return model, history
 
 
 if __name__ == "__main__":
@@ -146,6 +177,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=64, help="Training batch size")
     parser.add_argument("--hp_json_path", type=str, default=None, help="Optional path to a JSON file containing hyperparameters from tuning.")
+    parser.add_argument("--verbose", type=int, default=1, help="Verbosity mode for training")
 
     # Add arguments for hyperparameters (used if JSON is not provided or as overrides/defaults)
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate (used if not in JSON)")
@@ -184,12 +216,13 @@ if __name__ == "__main__":
         hyperparameters.setdefault('dropout_rate', args.dropout_rate)
 
     # Pass the consolidated hyperparameters dictionary
-    train_model(
+    model, history = train_model(
         station_id=args.station_id,
         model_type=args.model_type,
+        hyperparameters=hyperparameters,
         epochs=args.epochs,
         batch_size=args.batch_size,
-        hyperparameters=hyperparameters
+        verbose=args.verbose
     )
 
     print("\nScript finished.")

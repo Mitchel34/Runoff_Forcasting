@@ -6,17 +6,20 @@ Uses Hyperband or BayesianOptimization to find optimal hyperparameters.
 
 import argparse
 import os
-import json # Ensure json is imported at the top
+import json
 import numpy as np
 import tensorflow as tf
 import keras_tuner as kt
 from tensorflow.keras.callbacks import EarlyStopping
-from sklearn.model_selection import train_test_split # For creating validation set
+from sklearn.model_selection import train_test_split
+import time  # Add time for tracking performance
 
 # Import model building functions and data loading
 from models.lstm import build_lstm_model
 from models.transformer import build_transformer_model
-# We'll use our own load_data function to handle key name mismatch
+
+# Import GPU configuration
+from gpu_utils import configure_metal_gpu
 
 # Define paths - Use absolute paths for reliability
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -104,8 +107,14 @@ class TransformerHyperModel(kt.HyperModel):
 
 def run_tuning(station_id, model_type, max_trials, epochs_per_trial, batch_size, tuner_type='hyperband'):
     """Runs the hyperparameter tuning process."""
+    # Enable Metal GPU acceleration if available
+    gpu_available = configure_metal_gpu()
+    
     print(f"\n--- Starting Hyperparameter Tuning for Station {station_id} ({model_type.upper()}) --- ")
+    print(f"Using {'Metal GPU acceleration' if gpu_available else 'CPU only'}")
     print(f"Tuner: {tuner_type}, Max Trials: {max_trials}, Epochs per Trial: {epochs_per_trial}, Batch Size: {batch_size}")
+
+    start_time = time.time()  # Track tuning time
 
     # 1. Load Data
     X, y = load_data(station_id, 'train')
@@ -188,6 +197,10 @@ def run_tuning(station_id, model_type, max_trials, epochs_per_trial, batch_size,
         print(f"\nBest hyperparameters saved to: {save_path}")
     except Exception as e:
         print(f"\nError saving hyperparameters to JSON: {e}")
+
+    # After tuning, report performance metrics
+    tuning_time = time.time() - start_time
+    print(f"\nTuning completed in {tuning_time:.2f} seconds ({tuning_time/60:.2f} minutes)")
 
     # Optional: Build the best model and train it on full data (or do this in train.py)
     # best_model = tuner.hypermodel.build(best_hps)
