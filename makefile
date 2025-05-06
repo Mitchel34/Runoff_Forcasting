@@ -59,6 +59,15 @@ evaluate: train
 	PYTHONPATH=. python3 src/evaluate.py --station_id 20380357 --model_type transformer
 	@echo "====== Evaluation Complete ======"
 
+# Evaluate only (no dependencies)
+evaluate-only:
+	@echo "====== Evaluating Models (without retraining) ======"
+	PYTHONPATH=. python3 src/evaluate.py --station_id 21609641 --model_type lstm
+	PYTHONPATH=. python3 src/evaluate.py --station_id 21609641 --model_type transformer
+	PYTHONPATH=. python3 src/evaluate.py --station_id 20380357 --model_type lstm
+	PYTHONPATH=. python3 src/evaluate.py --station_id 20380357 --model_type transformer
+	@echo "====== Evaluation Complete ======"
+
 # Create directory structure
 setup:
 	@echo "====== Creating Directory Structure ======"
@@ -110,4 +119,4 @@ clean-logs:
 	rm -rf logs/*
 
 # Mark targets that don't create files with their names
-.PHONY: all preprocess tune tune_hyperband tune_bayesian train evaluate setup clean clean-processed clean-models clean-results clean-logs verify-data
+.PHONY: all preprocess tune tune_hyperband tune_bayesian train evaluate evaluate-only setup clean clean-processed clean-models clean-results clean-logs verify-data

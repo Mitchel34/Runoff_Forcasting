@@ -156,133 +156,130 @@ def calculate_metrics_by_month(usgs_original: np.ndarray, nwm_original: np.ndarr
     return monthly_metrics
 
 def create_improvement_boxplots(original_flows, corrected_flows, observed_flows, station_id, model_type):
-    """
-    Create boxplots showing the percentage improvement of corrected forecasts over NWM forecasts.
+    """Create boxplots showing percentage improvement in forecasts."""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    import seaborn as sns
+    import os
     
-    Args:
-        original_flows: DataFrame with original NWM forecast flows
-        corrected_flows: DataFrame with corrected forecast flows
-        observed_flows: DataFrame with observed actual flows
-        station_id: Station identifier
-        model_type: Model type (lstm or transformer)
-    """
-    # Calculate absolute errors for both original and corrected forecasts
-    original_errors = abs(original_flows - observed_flows)
-    corrected_errors = abs(corrected_flows - observed_flows)
+    # First, make sure we're working with arrays, not DataFrames
+    original_flows_array = original_flows.values if hasattr(original_flows, 'values') else np.array(original_flows)
+    corrected_flows_array = corrected_flows.values if hasattr(corrected_flows, 'values') else np.array(corrected_flows)
+    observed_flows_array = observed_flows.values if hasattr(observed_flows, 'values') else np.array(observed_flows)
     
-    # Calculate percentage improvement at each point
-    # (positive values mean improvement, negative values mean degradation)
-    pct_improvement = ((original_errors - corrected_errors) / original_errors) * 100
+    # Calculate absolute errors for each lead time separately
+    original_errors = np.abs(original_flows_array - observed_flows_array)
+    corrected_errors = np.abs(corrected_flows_array - observed_flows_array)
     
-    # Replace infinite values (caused by original_error = 0) with NaN
-    pct_improvement = pct_improvement.replace([np.inf, -np.inf], np.nan).dropna()
+    # Calculate percentage improvement safely
+    with np.errstate(divide='ignore', invalid='ignore'):
+        pct_improvement = ((original_errors - corrected_errors) / np.maximum(original_errors, 1e-10)) * 100
+        
+    # Replace inf and -inf with NaN
+    pct_improvement = np.nan_to_num(pct_improvement, nan=np.nan, posinf=np.nan, neginf=np.nan)
     
-    # Create figure
+    # Create figure for plots
     plt.figure(figsize=(14, 10))
     
-    # 1. Improvement by flow magnitude
+    # 1. Improvement by flow magnitude - use first lead time for categories
     plt.subplot(2, 2, 1)
     
-    # Categorize flow by magnitude
-    flow_categories = pd.cut(observed_flows, 
-                            bins=[0, 10, 50, 100, float('inf')],
-                            labels=['Low (<10)', 'Medium (10-50)', 'High (50-100)', 'Very High (>100)'])
+    # Use the first lead time column for categorization
+    observed_values = observed_flows_array[:, 0]  # First lead time
+    improvements = pct_improvement[:, 0]  # Improvement for first lead time
     
-    # Create dataframe with improvements and categories
+    # Create flow magnitude bins safely with 1D arrays
+    flow_categories = pd.cut(
+        observed_values,
+        bins=[0, 10, 50, 100, float('inf')],
+        labels=['Low (<10)', 'Medium (10-50)', 'High (50-100)', 'Very High (>100)']
+    )
+    
+    # Create dataframe for plotting
     flow_df = pd.DataFrame({
-        'Improvement': pct_improvement.values.flatten(),
-        'Flow Category': flow_categories.values.flatten()
+        'Improvement': improvements,
+        'Flow Category': flow_categories
     }).dropna()
     
-    # Create boxplot
+    # Plot
     sns.boxplot(x='Flow Category', y='Improvement', data=flow_df)
     plt.axhline(y=0, color='r', linestyle='--')
-    plt.title('Forecast Improvement by Flow Magnitude')
+    plt.title('Forecast Improvement by Flow Magnitude (Lead Time 1)')
     plt.xlabel('Observed Flow Magnitude (cms)')
     plt.ylabel('Percentage Improvement (%)')
-    plt.ylim(-50, 100)  # Adjust as needed based on your data
+    plt.ylim(-50, 100)
     
     # 2. Improvement by lead time
     plt.subplot(2, 2, 2)
     
-    # Extract lead times from the data
-    if isinstance(pct_improvement, pd.DataFrame) and pct_improvement.shape[1] > 1:
-        # If we have separate columns for each lead time
-        lead_improvements = []
-        for lead in range(pct_improvement.shape[1]):
-            lead_values = pct_improvement.iloc[:, lead].dropna().tolist()
-            lead_improvements.extend([(lead+1, val) for val in lead_values])
-        
-        lead_df = pd.DataFrame(lead_improvements, columns=['Lead Time', 'Improvement'])
-    else:
-        # If we have a single column (reshape as needed)
-        lead_df = pd.DataFrame({
-            'Lead Time': 1,  # Adjust if you have lead time information
-            'Improvement': pct_improvement.values.flatten()
-        }).dropna()
+    # Prepare data for lead time analysis
+    lead_data = []
+    for lead in range(pct_improvement.shape[1]):
+        lead_values = pct_improvement[:, lead]
+        for val in lead_values[~np.isnan(lead_values)]:
+            lead_data.append((lead+1, val))
     
+    lead_df = pd.DataFrame(lead_data, columns=['Lead Time', 'Improvement'])
+    
+    # Create boxplot
     sns.boxplot(x='Lead Time', y='Improvement', data=lead_df)
     plt.axhline(y=0, color='r', linestyle='--')
     plt.title('Forecast Improvement by Lead Time')
     plt.xlabel('Forecast Lead Time (hours)')
     plt.ylabel('Percentage Improvement (%)')
-    plt.ylim(-50, 100)  # Adjust as needed
+    plt.ylim(-50, 100)
     
-    # 3. Improvement by month/season
+    # 3. Overall improvement distribution
     plt.subplot(2, 2, 3)
     
-    # Extract month information from your timestamps
-    # This assumes your data has a DatetimeIndex or a column with dates
-    if isinstance(observed_flows.index, pd.DatetimeIndex):
-        dates = observed_flows.index
-    else:
-        # If you have timestamps in a different format, adjust accordingly
-        dates = pd.to_datetime(observed_flows.index)
+    # Flatten all improvements for overall distribution
+    all_improvements = pct_improvement.flatten()
+    all_improvements = all_improvements[~np.isnan(all_improvements)]
     
-    # Create dataframe with improvements and months
-    month_df = pd.DataFrame({
-        'Month': dates.month,
-        'Improvement': pct_improvement.values.flatten()
-    }).dropna()
-    
-    sns.boxplot(x='Month', y='Improvement', data=month_df)
-    plt.axhline(y=0, color='r', linestyle='--')
-    plt.title('Forecast Improvement by Month')
-    plt.xlabel('Month')
-    plt.xticks(range(12), ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
-    plt.ylabel('Percentage Improvement (%)')
-    plt.ylim(-50, 100)  # Adjust as needed
-    
-    # 4. Overall improvement distribution
-    plt.subplot(2, 2, 4)
-    
-    # Create overall boxplot
-    plt.boxplot(pct_improvement.values.flatten())
+    plt.boxplot(all_improvements)
     plt.axhline(y=0, color='r', linestyle='--')
     plt.title('Overall Forecast Improvement Distribution')
-    plt.xlabel('All Forecasts')
+    plt.xlabel('All Lead Times')
     plt.ylabel('Percentage Improvement (%)')
-    plt.ylim(-50, 100)  # Adjust as needed
+    plt.ylim(-50, 100)
     plt.xticks([1], ['All Data'])
     
     # Add overall statistics as text
-    mean_imp = np.nanmean(pct_improvement.values)
-    median_imp = np.nanmedian(pct_improvement.values)
-    pct_positive = (pct_improvement > 0).sum() / pct_improvement.count() * 100
+    mean_imp = np.nanmean(pct_improvement)
+    median_imp = np.nanmedian(pct_improvement)
+    pct_positive = (pct_improvement > 0).sum() / (~np.isnan(pct_improvement)).sum() * 100
     
     plt.text(0.98, 0.02, 
              f'Mean: {mean_imp:.2f}%\nMedian: {median_imp:.2f}%\n% Improved: {pct_positive:.1f}%',
              transform=plt.gca().transAxes, ha='right', va='bottom',
              bbox=dict(boxstyle='round', fc='white', alpha=0.8))
     
-    # Adjust layout and save
+    # 4. Median improvement by lead time
+    plt.subplot(2, 2, 4)
+    
+    # Calculate median improvement for each lead time
+    median_by_lead = [np.nanmedian(pct_improvement[:, i]) for i in range(pct_improvement.shape[1])]
+    
+    plt.plot(range(1, len(median_by_lead)+1), median_by_lead, marker='o', linestyle='-')
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.title('Median Improvement by Lead Time')
+    plt.xlabel('Lead Time (hours)')
+    plt.ylabel('Median Percentage Improvement (%)')
+    plt.grid(True, alpha=0.3)
+    
+    # Save the plot using the PLOTS_DIR constant
     plt.suptitle(f'Forecast Percentage Improvement: Station {station_id}, {model_type.upper()} Model',
                 fontsize=16)
     plt.tight_layout()
     plt.subplots_adjust(top=0.92)
-    plt.savefig(f"results/plots/{station_id}_{model_type}_pct_improvement_boxplots.png", dpi=300, bbox_inches='tight')
+    
+    # Use the PLOTS_DIR constant for saving instead of hardcoded path
+    PLOTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'results', 'plots')
+    plot_filename = os.path.join(PLOTS_DIR, f"{station_id}_{model_type}_pct_improvement_boxplots.png")
+    plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
     plt.close()
-
+    
     print(f"Mean percentage improvement: {mean_imp:.2f}%")
     print(f"Median percentage improvement: {median_imp:.2f}%")
     print(f"Percentage of forecasts improved: {pct_positive:.1f}%")
