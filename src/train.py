@@ -16,11 +16,13 @@ from joblib import load as joblib_load
 from models.lstm import build_lstm_model
 from models.transformer import build_transformer_model
 
-# Define paths (adjust if your structure differs)
-PROCESSED_DATA_DIR = os.path.join('..', 'data', 'processed')
-MODELS_SAVE_DIR = os.path.join('..', 'models')
+# Define paths using absolute paths based on script location
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+PROCESSED_DATA_DIR = os.path.join(PROJECT_ROOT, 'data', 'processed')
+MODELS_SAVE_DIR = os.path.join(PROJECT_ROOT, 'models')
 SCALERS_DIR = os.path.join(PROCESSED_DATA_DIR, 'scalers')
-TUNER_LOG_DIR = os.path.join('..', 'tuner_logs') # For potentially loading HPs
+TUNER_LOG_DIR = os.path.join(PROJECT_ROOT, 'tuner_logs') # For potentially loading HPs
 
 def load_data(station_id, data_type='train'):
     """Loads preprocessed data for a given station and type (train/test)."""
