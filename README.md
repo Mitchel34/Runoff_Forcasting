@@ -4,7 +4,7 @@ This project implements deep learning models to improve National Water Model (NW
 - **Station 21609641**: LSTM-based and Transformer-based error prediction models
 - **Station 20380357**: LSTM-based and Transformer-based error prediction models
 
-## Project Setup
+## Project InitialSetup
 
 ### 1. Environment Setup
 
